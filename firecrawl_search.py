@@ -1,4 +1,4 @@
-"""Firecrawl-based web scraping for finding restaurant Instagram handles."""
+"""Firecrawl-based web search for finding restaurant Instagram handles."""
 
 import asyncio
 from typing import Optional
@@ -7,15 +7,15 @@ import re
 from config import settings
 
 try:
-    from firecrawl import FirecrawlApp
+    from firecrawl import AsyncFirecrawlApp, ScrapeOptions
     FIRECRAWL_AVAILABLE = True
 except ImportError:
     FIRECRAWL_AVAILABLE = False
     print("⚠️ Firecrawl not available. Install with: pip install firecrawl-py")
 
-def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: str, phone: str) -> Optional[str]:
+async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: str, phone: str) -> Optional[str]:
     """
-    Use Firecrawl to scrape relevant websites for restaurant Instagram handle, then analyze with OpenAI.
+    Use Firecrawl search to find restaurant Instagram handle, then analyze with OpenAI.
     
     Args:
         restaurant_name: Name of the restaurant
@@ -43,61 +43,58 @@ def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: st
     city = city_match.group(1) if city_match else ""
     
     try:
-        print(f"🔥 Using Firecrawl scraping for: {restaurant_name}")
+        print(f"🔥 Using Firecrawl search for: {restaurant_name}")
         
-        # Initialize Firecrawl (sync version)
-        app = FirecrawlApp(api_key=settings.firecrawl_api_key)
+        # Initialize Firecrawl
+        app = AsyncFirecrawlApp(api_key=settings.firecrawl_api_key)
         
-        # Create URLs to scrape for Instagram handles
-        # We'll scrape some known restaurant directory sites
-        scrape_urls = []
-        
-        # Add restaurant's potential website
-        restaurant_search = f"{restaurant_name} {city}".replace(" ", "+")
-        restaurant_domain = restaurant_name.lower().replace(" ", "").replace("'", "")
-        
-        # Common restaurant website patterns
-        potential_websites = [
-            f"https://www.{restaurant_domain}.com",
-            f"https://{restaurant_domain}.com",
+        # Create comprehensive search queries targeting specific sites
+        search_queries = [
+            f"{restaurant_name} {address} instagram social media",
+            f"{restaurant_name} {address} site:yelp.com",
+            f"{restaurant_name} {address} site:tripadvisor.com",
+            f"{restaurant_name} {city} instagram handle",
+            f"{restaurant_name} {city} social media profiles",
         ]
-        
-        # Try to scrape the restaurant's main website first
-        scrape_urls.extend(potential_websites[:1])  # Try the first one
         
         all_content = []
         
-        for i, url in enumerate(scrape_urls):
-            print(f"   🔍 Firecrawl scraping URL {i+1}: {url}")
+        for i, query in enumerate(search_queries[:3]):  # Try first 3 queries
+            print(f"   🔍 Firecrawl query {i+1}: {query}")
             
             try:
-                # Scrape with Firecrawl
-                response = app.scrape_url(
-                    url=url,
-                    formats=['markdown']
+                # Search with Firecrawl using the search endpoint
+                response = await app.search(
+                    query=query,
+                    limit=3,  # Fewer results per query to try more queries
+                    scrape_options={
+                        "formats": ["markdown"],
+                        "onlyMainContent": True
+                    }
                 )
                 
-                if response and 'content' in response:
-                    content = response['content']
-                    if content and len(content.strip()) > 100:  # Only include substantial content
-                        all_content.append(content)
-                        print(f"   📋 URL {i+1} scraped successfully ({len(content)} chars)")
-                    else:
-                        print(f"   ⚠️ URL {i+1} returned minimal content")
-                else:
-                    print(f"   ❌ URL {i+1} scraping failed - no content")
+                if response and response.get('success') and response.get('data'):
+                    results_count = len(response['data'])
+                    print(f"   📋 Query {i+1} found {results_count} results")
                     
-            except Exception as url_error:
-                print(f"   ❌ URL {i+1} scraping failed: {url_error}")
+                    # Extract content from this query
+                    content = _extract_content_from_response(response)
+                    if content:
+                        all_content.append(content)
+                else:
+                    print(f"   ❌ Query {i+1} returned no results")
+                    
+            except Exception as query_error:
+                print(f"   ❌ Query {i+1} failed: {query_error}")
                 continue
         
         if not all_content:
-            print("   ❌ No content found from any Firecrawl scraping")
+            print("   ❌ No content found in any Firecrawl results")
             return None
         
         # Combine all content and analyze with OpenAI
         combined_content = "\n\n".join(all_content)
-        handle = _analyze_content_with_openai_sync(combined_content, restaurant_name, address)
+        handle = await _analyze_content_with_openai(combined_content, restaurant_name, address)
         
         if handle:
             print(f"   ✅ Firecrawl + OpenAI found handle: @{handle}")
@@ -107,24 +104,62 @@ def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: st
             return None
             
     except Exception as e:
-        print(f"   ❌ Firecrawl scraping failed: {e}")
+        print(f"   ❌ Firecrawl search failed: {e}")
         return None
 
-def _analyze_content_with_openai_sync(content: str, restaurant_name: str, address: str) -> Optional[str]:
-    """Analyze scraped content with OpenAI to find Instagram handle."""
+def _extract_content_from_response(response) -> Optional[str]:
+    """Extract relevant content from Firecrawl search response."""
     try:
-        client = openai.OpenAI(api_key=settings.openai_api_key)
+        if not response or not response.get('success'):
+            return None
+            
+        data = response.get('data', [])
+        if not data:
+            return None
+        
+        content_parts = []
+        for item in data:
+            # Get title and description from search result
+            title = item.get('title', '')
+            description = item.get('description', '')
+            url = item.get('url', '')
+            markdown = item.get('markdown', '')
+            
+            # Combine all available text
+            item_content = []
+            if title:
+                item_content.append(f"Title: {title}")
+            if description:
+                item_content.append(f"Description: {description}")
+            if url:
+                item_content.append(f"URL: {url}")
+            if markdown and len(markdown) > 50:  # Only include if substantial
+                item_content.append(f"Content: {markdown[:1000]}")  # Limit content length
+            
+            if item_content:
+                content_parts.append("\n".join(item_content))
+        
+        return "\n\n---\n\n".join(content_parts) if content_parts else None
+        
+    except Exception as e:
+        print(f"   ❌ Content extraction failed: {e}")
+        return None
+
+async def _analyze_content_with_openai(content: str, restaurant_name: str, address: str) -> Optional[str]:
+    """Analyze search content with OpenAI to find Instagram handle."""
+    try:
+        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
         
         # Truncate content if too long (keep first 4000 chars)
         if len(content) > 4000:
             content = content[:4000] + "..."
         
-        prompt = f"""You are analyzing web content to find the Instagram handle for a restaurant.
+        prompt = f"""You are analyzing web search results to find the Instagram handle for a restaurant.
 
 Restaurant: {restaurant_name}
 Address: {address}
 
-Content to analyze:
+Search results to analyze:
 {content}
 
 Look for Instagram links, handles, or social media mentions. Extract ONLY the Instagram handle (username) without the @ symbol.
@@ -138,7 +173,7 @@ Rules:
 
 Restaurant Instagram handle:"""
 
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",  # Using faster, cheaper model for this task
             messages=[{"role": "user", "content": prompt}],
             max_tokens=50,
@@ -159,4 +194,12 @@ Restaurant Instagram handle:"""
         
     except Exception as e:
         print(f"   ❌ OpenAI analysis failed: {e}")
+        return None
+
+def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: str, phone: str) -> Optional[str]:
+    """Synchronous wrapper for the async Firecrawl search function."""
+    try:
+        return asyncio.run(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))
+    except Exception as e:
+        print(f"   ❌ Firecrawl sync wrapper failed: {e}")
         return None
