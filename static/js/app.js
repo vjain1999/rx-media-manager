@@ -63,27 +63,8 @@ class RestaurantAnalyzer {
         // Clear previous progress
         this.clearProgress();
 
-        // Start processing
-        fetch('/process', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(formData)
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                this.showModal('error', 'Error', data.error);
-                this.toggleForm(true);
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            this.showModal('error', 'Error', 'Failed to start analysis. Please try again.');
-            this.toggleForm(true);
-        });
-    }
+        // Start processing via WebSocket
+        this.socket.emit("start_processing", formData);    }
 
     updateProgress(data) {
         const { step, status, message, progress_percent, data: stepData } = data;

@@ -353,30 +353,6 @@ def handle_connect():
     logger.info('👤 Client connected to WebSocket')
     emit('connected', {'status': 'Connected to restaurant analyzer'})
 
-@app.route("/logs")
-def view_logs():
-    """Simple endpoint to view recent logs (for debugging)"""
-    try:
-        log_info = {
-            "message": "Detailed logs are available in Railway dashboard under Deploy Logs tab",
-            "log_level": os.environ.get("LOG_LEVEL", "INFO"),
-            "debug_mode": os.environ.get("DEBUG", "false"),
-            "timestamp": datetime.now().isoformat()
-        }
-        return jsonify(log_info)
-    except Exception as e:
-        logger.error(f"Error accessing logs: {str(e)}")
-        return jsonify({"error": "Could not access logs"}), 500
-
-@app.route("/health")
-def health_check():
-    """Health check endpoint"""
-    logger.info("🏥 Health check requested")
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0"
-    })
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection"""
@@ -399,4 +375,38 @@ if __name__ == '__main__':
     logger.info(f"🌐 Open your browser to: http://localhost:{port}")
     socketio.run(app, debug=debug_mode, host='0.0.0.0', port=port, allow_unsafe_werkzeug=True)
 
+@app.route('/logs')
+def view_logs():
+    """Simple endpoint to view recent logs (for debugging)"""
+    try:
+        # In production, you might want to read from a log file
+        # For now, we'll just return a simple message
+        log_info = {
+            'message': 'Detailed logs are available in Railway dashboard under Deploy Logs tab',
+            'log_level': os.environ.get('LOG_LEVEL', 'INFO'),
+            'debug_mode': os.environ.get('DEBUG', 'false'),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # If you want to implement file-based logging later:
+        # try:
+        #     with open('app.log', 'r') as f:
+        #         recent_logs = f.readlines()[-100:]  # Last 100 lines
+        #     log_info['recent_logs'] = recent_logs
+        # except FileNotFoundError:
+        #     log_info['recent_logs'] = ['No log file found']
+        
+        return jsonify(log_info)
+    except Exception as e:
+        logger.error(f"Error accessing logs: {str(e)}")
+        return jsonify({'error': 'Could not access logs'}), 500
 
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    logger.info("🏥 Health check requested")
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'version': '1.0.0'
+    })
