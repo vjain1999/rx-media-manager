@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["python310", "libGL", "libglib", "libgcc"]
-
-[phases.install]
-cmds = ["pip install --upgrade pip"]
-
-[start]
-cmd = "python web_app.py"
