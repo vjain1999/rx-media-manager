@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, Dict
 import time
 import random
+from config import settings
 
 def download_instagram_video_ytdlp(shortcode: str, download_path: str = "downloads/videos") -> bool:
     """
@@ -41,6 +42,14 @@ def download_instagram_video_ytdlp(shortcode: str, download_path: str = "downloa
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
             }
         }
+        
+        # Add Instagram authentication if credentials are available
+        if settings.instagram_username and settings.instagram_password:
+            print(f"   🔐 Using Instagram credentials for {settings.instagram_username}")
+            ydl_opts['username'] = settings.instagram_username
+            ydl_opts['password'] = settings.instagram_password
+        else:
+            print("   ⚠️ No Instagram credentials configured - downloads may fail")
         
         # Add random delay to avoid rate limiting
         delay = random.uniform(1, 3)
