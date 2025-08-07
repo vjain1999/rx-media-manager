@@ -49,6 +49,11 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 class WebProgressTracker:
     """Tracks processing progress and emits updates via WebSocket"""
     
+    def __init__(self, socketio, session_id=None):
+        self.socketio = socketio
+        self.session_id = session_id
+    """Tracks processing progress and emits updates via WebSocket"""
+    
     def __init__(self, socketio):
         self.socketio = socketio
         self.current_step = 0
@@ -243,43 +248,49 @@ def index():
     return render_template('index.html')
 
 @socketio.on('start_processing')
+@socketio.on("start_processing")
 def handle_start_processing(data):
     """Handle restaurant processing request via WebSocket"""
     logger.info(f"🎬 Received processing request: {data}")
     
     try:
-        restaurant_name = data.get('restaurant_name', '').strip()
-        address = data.get('address', '').strip()
-        phone = data.get('phone', '').strip()
-        min_quality_score = float(data.get('min_quality_score', 7.0))
-        days_back = int(data.get('days_back', 30))
+        restaurant_name = data.get("restaurant_name", "").strip()
+        address = data.get("address", "").strip()
+        phone = data.get("phone", "").strip()
+        min_quality_score = float(data.get("min_quality_score", 7.0))
+        days_back = int(data.get("days_back", 30))
         
         if not all([restaurant_name, address, phone]):
             error_msg = "Missing required fields"
             logger.error(f"Validation failed: {error_msg}")
-            emit('processing_error', {'error': error_msg})
+            emit("processing_error", {"error": error_msg})
             return
         
+        # Get the current session ID for background thread communication
+        session_id = request.sid
+        
         # Process in background thread
-        processor = WebRestaurantProcessor(progress_tracker)
+        # Create session-specific progress tracker
+        session_tracker = WebProgressTracker(socketio, session_id)
+        processor = WebRestaurantProcessor(session_tracker)
         
         def process_in_thread():
             try:
                 logger.info(f"🧵 Starting background processing thread")
                 result = processor.process_restaurant(restaurant_name, address, phone, min_quality_score, days_back)
-                if 'error' in result:
-                    logger.error(f"Processing error: {result['error']}")
-                    emit('processing_error', result)
+                if "error" in result:
+                    logger.error(f"Processing error: {result["error"]}")
+                    socketio.emit("processing_error", result, room=session_id)
                 else:
                     logger.info("✅ Background processing completed successfully")
             except Exception as e:
                 logger.error(f"Background thread error: {str(e)}", exc_info=True)
-                emit('processing_error', {'error': f'Processing failed: {str(e)}'})
+                socketio.emit("processing_error", {"error": f"Processing failed: {str(e)}"}, room=session_id)
         
         thread = threading.Thread(target=process_in_thread)
         thread.daemon = True
         thread.start()
-        logger.info("🚀 Background processing thread started")
+        logger.info("🚀 Background processing thread started")        logger.info("🚀 Background processing thread started")
         
     except Exception as e:
         error_msg = f'Request handling failed: {str(e)}'

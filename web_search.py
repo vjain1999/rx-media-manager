@@ -17,7 +17,7 @@ class RestaurantInstagramFinder:
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         })
     
-    def find_instagram_handle(self, restaurant_name: str, address: str, phone: str) -> Optional[str]:
+    def find_instagram_handle(self, restaurant_name: str, address: str, phone: str = "") -> Optional[str]:
         """
         Find Instagram handle for a restaurant using multiple search strategies.
         
@@ -249,7 +249,7 @@ class RestaurantInstagramFinder:
         
         return False
 
-def find_restaurant_instagram(restaurant_name: str, address: str, phone: str) -> Optional[str]:
+def find_restaurant_instagram(restaurant_name: str, address: str, phone: str = "") -> Optional[str]:
     """
     Convenience function to find Instagram handle for a restaurant.
     
