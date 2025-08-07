@@ -88,7 +88,7 @@ class WebProgressTracker:
     def emit_final_results(self, results):
         """Emit final processing results"""
         logger.info("🎉 Processing completed successfully")
-        logger.info(f"📈 Final results: {results["videos_found"]} found, {results["videos_approved"]} approved")
+        logger.info("📈 Final results: %s found, %s approved", results.get("videos_found", 0), results.get("videos_approved", 0))
         if self.session_id:
             self.socketio.emit("processing_complete", results, room=self.session_id)
         else:
