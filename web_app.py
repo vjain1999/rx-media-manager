@@ -52,14 +52,10 @@ class WebProgressTracker:
     def __init__(self, socketio, session_id=None):
         self.socketio = socketio
         self.session_id = session_id
-    """Tracks processing progress and emits updates via WebSocket"""
-    
-    def __init__(self, socketio):
-        self.socketio = socketio
         self.current_step = 0
         self.steps = [
             "Finding Instagram Handle",
-            "Fetching Recent Videos", 
+            "Fetching Recent Videos",
             "Downloading Videos",
             "Analyzing Video Quality",
             "Filtering by Quality Score",
@@ -71,26 +67,32 @@ class WebProgressTracker:
         """Update progress and emit to connected clients"""
         self.current_step = step
         progress_data = {
-            'step': step,
-            'status': status,
-            'message': message,
-            'total_steps': len(self.steps),
-            'step_name': self.steps[step-1] if 1 <= step <= len(self.steps) else "Unknown",
-            'timestamp': datetime.now().isoformat(),
-            'data': data or {}
+            "step": step,
+            "status": status,
+            "message": message,
+            "total_steps": len(self.steps),
+            "step_name": self.steps[step-1] if 1 <= step <= len(self.steps) else "Unknown",
+            "timestamp": datetime.now().isoformat(),
+            "data": data or {}
         }
         
         logger.info(f"📊 Step {step}/{len(self.steps)} - {status.upper()}: {message}")
         if data:
             logger.debug(f"📋 Step {step} data: {json.dumps(data, indent=2, default=str)}")
         
-        self.socketio.emit('progress_update', progress_data)
+        if self.session_id:
+            self.socketio.emit("progress_update", progress_data, room=self.session_id)
+        else:
+            self.socketio.emit("progress_update", progress_data)
     
     def emit_final_results(self, results):
         """Emit final processing results"""
         logger.info("🎉 Processing completed successfully")
-        logger.info(f"📈 Final results: {results['videos_found']} found, {results['videos_approved']} approved")
-        self.socketio.emit('processing_complete', results)
+        logger.info(f"📈 Final results: {results["videos_found"]} found, {results["videos_approved"]} approved")
+        if self.session_id:
+            self.socketio.emit("processing_complete", results, room=self.session_id)
+        else:
+            self.socketio.emit("processing_complete", results)
 
 class WebRestaurantProcessor:
     """Handles restaurant processing with web progress tracking"""
