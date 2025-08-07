@@ -241,6 +241,9 @@ class RestaurantInstagramFinder:
                 return matches >= required_matches
             elif response.status_code == 404:
                 print(f"      ❌ Handle @{handle} does not exist")
+            elif response.status_code == 429:
+                print(f"      ⚠️ Rate limited (429) - assuming handle exists: @{handle}")
+                return True  # Accept handle when rate limited
             else:
                 print(f"      ⚠️ Unexpected response code: {response.status_code}")
             
