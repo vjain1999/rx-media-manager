@@ -21,8 +21,10 @@ class InstagramVideoFetcher:
             download_comments=False,
             save_metadata=False,
             compress_json=False,
-            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            sleep=True  # Enable sleep between requests
+            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            sleep=True,  # Enable sleep between requests
+            request_timeout=30.0,  # Increase timeout
+            max_connection_attempts=3  # Retry failed connections
         )
         
         # Session management
