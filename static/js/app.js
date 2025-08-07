@@ -1,0 +1,445 @@
+// Restaurant Video Analyzer - Frontend JavaScript
+class RestaurantAnalyzer {
+    constructor() {
+        this.socket = io();
+        this.currentResults = null;
+        this.initEventListeners();
+        this.initSocketListeners();
+    }
+
+    initEventListeners() {
+        // Form submission
+        document.getElementById('restaurantForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.startAnalysis();
+        });
+
+        // Send SMS button
+        document.getElementById('sendSmsBtn').addEventListener('click', () => {
+            this.sendSMS();
+        });
+
+        // Close modal
+        document.getElementById('closeModal').addEventListener('click', () => {
+            this.hideModal();
+        });
+    }
+
+    initSocketListeners() {
+        this.socket.on('connect', () => {
+            console.log('Connected to server');
+        });
+
+        this.socket.on('progress_update', (data) => {
+            this.updateProgress(data);
+        });
+
+        this.socket.on('processing_complete', (results) => {
+            this.showResults(results);
+        });
+    }
+
+    startAnalysis() {
+        const formData = {
+            restaurant_name: document.getElementById('restaurantName').value.trim(),
+            address: document.getElementById('address').value.trim(),
+            phone: document.getElementById('phone').value.trim(),
+            min_score: parseFloat(document.getElementById('minScore').value)
+        };
+
+        // Validate form
+        if (!formData.restaurant_name || !formData.address || !formData.phone) {
+            this.showModal('error', 'Error', 'Please fill in all required fields.');
+            return;
+        }
+
+        // Show progress container
+        document.getElementById('progressContainer').style.display = 'block';
+        document.getElementById('resultsContainer').style.display = 'none';
+        
+        // Disable form
+        this.toggleForm(false);
+        
+        // Clear previous progress
+        this.clearProgress();
+
+        // Start processing
+        fetch('/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData)
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                this.showModal('error', 'Error', data.error);
+                this.toggleForm(true);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            this.showModal('error', 'Error', 'Failed to start analysis. Please try again.');
+            this.toggleForm(true);
+        });
+    }
+
+    updateProgress(data) {
+        const { step, status, message, progress_percent, data: stepData } = data;
+        
+        // Update progress bar
+        document.getElementById('progressPercent').textContent = `${progress_percent}%`;
+        document.getElementById('progressBar').style.width = `${progress_percent}%`;
+
+        // Get or create step element
+        let stepElement = document.getElementById(`step-${step}`);
+        if (!stepElement) {
+            stepElement = this.createProgressStep(step, message);
+            document.getElementById('progressSteps').appendChild(stepElement);
+        }
+
+        // Update step status
+        this.updateProgressStep(stepElement, status, message, stepData);
+
+        // Scroll to current step
+        stepElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    createProgressStep(step, message) {
+        const stepElement = document.createElement('div');
+        stepElement.id = `step-${step}`;
+        stepElement.className = 'progress-step flex items-center p-4 bg-gray-50 rounded-lg border-l-4 border-gray-300';
+        
+        stepElement.innerHTML = `
+            <div class="flex-shrink-0 w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center mr-4">
+                <span class="step-number text-sm font-semibold text-gray-600">${step}</span>
+                <i class="step-icon hidden"></i>
+            </div>
+            <div class="flex-1">
+                <p class="step-message text-gray-700 font-medium">${message}</p>
+                <div class="step-details text-sm text-gray-500 mt-1 hidden"></div>
+            </div>
+            <div class="step-status">
+                <i class="fas fa-clock text-gray-400"></i>
+            </div>
+        `;
+
+        return stepElement;
+    }
+
+    updateProgressStep(stepElement, status, message, data) {
+        const stepNumber = stepElement.querySelector('.step-number');
+        const stepIcon = stepElement.querySelector('.step-icon');
+        const stepMessage = stepElement.querySelector('.step-message');
+        const stepDetails = stepElement.querySelector('.step-details');
+        const stepStatus = stepElement.querySelector('.step-status i');
+
+        // Update message
+        stepMessage.textContent = message;
+
+        // Remove existing status classes
+        stepElement.classList.remove('step-active', 'step-completed', 'step-error');
+        stepElement.classList.remove('border-blue-500', 'border-green-500', 'border-red-500', 'border-gray-300');
+
+        switch (status) {
+            case 'in_progress':
+                stepElement.classList.add('step-active', 'border-blue-500');
+                stepStatus.className = 'fas fa-spinner fa-spin text-blue-500';
+                stepElement.style.background = 'linear-gradient(135deg, #dbeafe, #bfdbfe)';
+                break;
+                
+            case 'completed':
+                stepElement.classList.add('step-completed', 'border-green-500');
+                stepNumber.style.display = 'none';
+                stepIcon.style.display = 'block';
+                stepIcon.className = 'step-icon fas fa-check text-white';
+                stepStatus.className = 'fas fa-check-circle text-green-500';
+                stepElement.style.background = 'linear-gradient(135deg, #d1fae5, #a7f3d0)';
+                
+                // Show additional details
+                if (data) {
+                    this.showStepDetails(stepDetails, data);
+                }
+                break;
+                
+            case 'error':
+                stepElement.classList.add('step-error', 'border-red-500');
+                stepNumber.style.display = 'none';
+                stepIcon.style.display = 'block';
+                stepIcon.className = 'step-icon fas fa-times text-white';
+                stepStatus.className = 'fas fa-exclamation-circle text-red-500';
+                stepElement.style.background = 'linear-gradient(135deg, #fee2e2, #fecaca)';
+                break;
+        }
+    }
+
+    showStepDetails(detailsElement, data) {
+        let details = '';
+        
+        if (data.instagram_handle) {
+            details += `Instagram: @${data.instagram_handle} `;
+        }
+        if (data.videos_count) {
+            details += `Found ${data.videos_count} videos `;
+        }
+        if (data.downloaded_count) {
+            details += `Downloaded ${data.downloaded_count} videos `;
+        }
+        if (data.approved_count !== undefined) {
+            details += `${data.approved_count} videos approved `;
+        }
+        
+        if (details) {
+            detailsElement.textContent = details;
+            detailsElement.classList.remove('hidden');
+        }
+    }
+
+    showResults(results) {
+        this.currentResults = results;
+        
+        // Show results container
+        document.getElementById('resultsContainer').style.display = 'block';
+        document.getElementById('resultsContainer').scrollIntoView({ behavior: 'smooth' });
+        
+        // Update summary stats
+        this.updateSummaryStats(results);
+        
+        // Show approved videos
+        this.showApprovedVideos(results.approved_videos || []);
+        
+        // Show SMS preview
+        this.showSMSPreview(results.sms_preview || '');
+        
+        // Re-enable form
+        this.toggleForm(true);
+    }
+
+    updateSummaryStats(results) {
+        const stats = [
+            { label: 'Videos Found', value: results.videos_found || 0, icon: 'fa-video', color: 'blue' },
+            { label: 'Downloaded', value: results.videos_downloaded || 0, icon: 'fa-download', color: 'indigo' },
+            { label: 'Approved', value: results.videos_approved || 0, icon: 'fa-check-circle', color: 'green' },
+            { label: 'Quality Score', value: this.getAverageScore(results.approved_videos), icon: 'fa-star', color: 'yellow' }
+        ];
+
+        const statsContainer = document.getElementById('summaryStats');
+        statsContainer.innerHTML = stats.map(stat => `
+            <div class="bg-${stat.color}-50 p-4 rounded-xl text-center">
+                <i class="fas ${stat.icon} text-${stat.color}-500 text-2xl mb-2"></i>
+                <div class="text-2xl font-bold text-${stat.color}-700">${stat.value}</div>
+                <div class="text-sm text-${stat.color}-600">${stat.label}</div>
+            </div>
+        `).join('');
+    }
+
+    getAverageScore(videos) {
+        if (!videos || videos.length === 0) return '0.0';
+        const total = videos.reduce((sum, video) => sum + (video.analysis?.overall_score || 0), 0);
+        return (total / videos.length).toFixed(1);
+    }
+
+    showApprovedVideos(videos) {
+        const container = document.getElementById('approvedVideos');
+        
+        if (videos.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-8">
+                    <i class="fas fa-info-circle text-gray-400 text-4xl mb-4"></i>
+                    <h3 class="text-lg font-semibold text-gray-600">No Videos Approved</h3>
+                    <p class="text-gray-500">No videos met the minimum quality standards.</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = `
+            <h3 class="text-lg font-semibold text-gray-900 mb-4">
+                <i class="fas fa-trophy text-yellow-500 mr-2"></i>
+                Approved Videos (${videos.length})
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                ${videos.map(video => this.createVideoCard(video)).join('')}
+            </div>
+        `;
+    }
+
+    createVideoCard(video) {
+        const analysis = video.analysis || {};
+        const foodItems = analysis.food_items || [];
+        const score = analysis.overall_score || 0;
+        
+        return `
+            <div class="video-card bg-white border border-gray-200 rounded-xl p-4">
+                <div class="flex justify-between items-start mb-3">
+                    <div class="flex-1">
+                        <h4 class="font-semibold text-gray-900">Video ${video.shortcode}</h4>
+                        <p class="text-sm text-gray-600">${foodItems.slice(0, 2).join(', ')}</p>
+                    </div>
+                    <div class="bg-green-100 px-3 py-1 rounded-full">
+                        <span class="text-green-800 font-semibold text-sm">${score.toFixed(1)}/10</span>
+                    </div>
+                </div>
+                
+                <div class="space-y-2 mb-4">
+                    ${this.createScoreBar('Food Quality', analysis.food_quality || 0)}
+                    ${this.createScoreBar('Visual Appeal', analysis.visual_appeal || 0)}
+                    ${this.createScoreBar('Professionalism', analysis.professionalism || 0)}
+                </div>
+                
+                <a href="${video.original_url}" target="_blank" 
+                   class="inline-flex items-center text-blue-600 hover:text-blue-800 font-medium">
+                    <i class="fab fa-instagram mr-2"></i>
+                    View on Instagram
+                    <i class="fas fa-external-link-alt ml-1 text-xs"></i>
+                </a>
+            </div>
+        `;
+    }
+
+    createScoreBar(label, score) {
+        const percentage = (score / 10) * 100;
+        const colorClass = score >= 7 ? 'bg-green-500' : score >= 5 ? 'bg-yellow-500' : 'bg-red-500';
+        
+        return `
+            <div class="flex items-center text-xs">
+                <span class="w-16 text-gray-600">${label}</span>
+                <div class="flex-1 bg-gray-200 rounded-full h-2 mx-2">
+                    <div class="${colorClass} h-2 rounded-full" style="width: ${percentage}%"></div>
+                </div>
+                <span class="text-gray-700 font-medium">${score.toFixed(1)}</span>
+            </div>
+        `;
+    }
+
+    showSMSPreview(smsPreview) {
+        const container = document.getElementById('smsContent');
+        
+        if (typeof smsPreview === 'string') {
+            // Legacy single message format
+            container.textContent = smsPreview;
+        } else if (smsPreview && smsPreview.total_messages) {
+            // New two-part message format
+            let html = '';
+            
+            if (smsPreview.total_messages === 2) {
+                html = `
+                    <div class="space-y-4">
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                            <div class="flex items-center mb-2">
+                                <i class="fas fa-mobile-alt text-blue-500 mr-2"></i>
+                                <span class="font-semibold text-blue-700">SMS 1/2</span>
+                                <span class="ml-auto text-xs text-blue-600">${smsPreview.message_1.length} chars</span>
+                            </div>
+                            <div class="text-sm text-gray-800 whitespace-pre-wrap">${smsPreview.message_1}</div>
+                        </div>
+                        
+                        <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+                            <div class="flex items-center mb-2">
+                                <i class="fas fa-mobile-alt text-green-500 mr-2"></i>
+                                <span class="font-semibold text-green-700">SMS 2/2</span>
+                                <span class="ml-auto text-xs text-green-600">${smsPreview.message_2.length} chars</span>
+                            </div>
+                            <div class="text-sm text-gray-800 whitespace-pre-wrap">${smsPreview.message_2}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                html = `<div class="text-sm text-gray-800 whitespace-pre-wrap">${smsPreview.message_1}</div>`;
+            }
+            
+            container.innerHTML = html;
+        } else {
+            container.textContent = 'No SMS preview available';
+        }
+    }
+
+    sendSMS() {
+        if (!this.currentResults) return;
+        
+        const button = document.getElementById('sendSmsBtn');
+        const originalText = button.innerHTML;
+        
+        // Show loading state
+        button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Sending...';
+        button.disabled = true;
+        
+        fetch('/send_sms', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                phone: this.currentResults.phone,
+                restaurant_name: this.currentResults.restaurant_name,
+                approved_videos: this.currentResults.approved_videos || []
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                this.showModal('error', 'SMS Error', data.error);
+            } else {
+                this.showModal('success', 'SMS Sent!', 'The message has been sent to the restaurant successfully.');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            this.showModal('error', 'Error', 'Failed to send SMS. Please try again.');
+        })
+        .finally(() => {
+            // Restore button
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+    }
+
+    clearProgress() {
+        document.getElementById('progressSteps').innerHTML = '';
+        document.getElementById('progressPercent').textContent = '0%';
+        document.getElementById('progressBar').style.width = '0%';
+    }
+
+    toggleForm(enabled) {
+        const form = document.getElementById('restaurantForm');
+        const inputs = form.querySelectorAll('input, select, button');
+        inputs.forEach(input => input.disabled = !enabled);
+        
+        const button = document.getElementById('analyzeBtn');
+        if (enabled) {
+            button.innerHTML = '<i class="fas fa-play mr-2"></i>Start Analysis';
+        } else {
+            button.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+        }
+    }
+
+    showModal(type, title, message) {
+        const modal = document.getElementById('notificationModal');
+        const icon = document.getElementById('notificationIcon');
+        const titleEl = document.getElementById('notificationTitle');
+        const messageEl = document.getElementById('notificationMessage');
+        
+        if (type === 'success') {
+            icon.innerHTML = '<i class="fas fa-check-circle text-green-500"></i>';
+        } else {
+            icon.innerHTML = '<i class="fas fa-exclamation-triangle text-red-500"></i>';
+        }
+        
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    hideModal() {
+        const modal = document.getElementById('notificationModal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+}
+
+// Initialize the app when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    new RestaurantAnalyzer();
+});

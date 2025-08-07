@@ -14,3 +14,6 @@ pydantic-settings==2.1.0
 numpy<2
 httpx==0.28.1
 firecrawl-py==1.4.0
+yt-dlp
+flask==3.0.0
+flask-socketio==5.3.6
