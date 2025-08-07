@@ -1,0 +1,17 @@
+[
+  {
+    "name": "Joe's Pizza Palace",
+    "address": "123 Broadway, New York, NY 10001",
+    "phone": "+12125551234"
+  },
+  {
+    "name": "Sakura Sushi",
+    "address": "456 Sunset Blvd, Los Angeles, CA 90028",
+    "phone": "+13235554567"
+  },
+  {
+    "name": "Mama's Italian Kitchen",
+    "address": "789 Michigan Ave, Chicago, IL 60611",
+    "phone": "+17735558901"
+  }
+]
