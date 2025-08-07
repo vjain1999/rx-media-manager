@@ -279,7 +279,7 @@ def handle_start_processing(data):
                 logger.info(f"🧵 Starting background processing thread")
                 result = processor.process_restaurant(restaurant_name, address, phone, min_quality_score, days_back)
                 if "error" in result:
-                    logger.error(f"Processing error: {result["error"]}")
+                    logger.error("Processing error: %s", result.get("error", "Unknown error"))
                     socketio.emit("processing_error", result, room=session_id)
                 else:
                     logger.info("✅ Background processing completed successfully")
@@ -290,7 +290,7 @@ def handle_start_processing(data):
         thread = threading.Thread(target=process_in_thread)
         thread.daemon = True
         thread.start()
-        logger.info("🚀 Background processing thread started")        logger.info("🚀 Background processing thread started")
+        logger.info("�� Background processing thread started")
         
     except Exception as e:
         error_msg = f'Request handling failed: {str(e)}'
