@@ -66,7 +66,11 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
                 # Search with Firecrawl using the search endpoint
                 response = await app.search(
                     query=query,
-                    limit=3  # Fewer results per query to try more queries
+                    limit=3,  # Fewer results per query to try more queries
+                    scrape_options=ScrapeOptions(
+                        formats=["markdown"],
+                        only_main_content=True
+                    )
                 )
                 
                 if response and response.get('success') and response.get('data'):
