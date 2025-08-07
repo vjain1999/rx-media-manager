@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 """Main orchestrator for the restaurant video analysis system."""
 
 import json
