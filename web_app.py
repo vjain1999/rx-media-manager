@@ -101,7 +101,7 @@ class WebRestaurantProcessor:
         self.tracker = tracker
         logger.info("🏗️ WebRestaurantProcessor initialized")
     
-    def process_restaurant(self, restaurant_name, address, phone, min_quality_score=7.0, days_back=30):
+    def process_restaurant(self, restaurant_name, address, phone, min_quality_score=5.0, days_back=30):
         """Process restaurant with real-time progress updates"""
         logger.info(f"🚀 Starting restaurant processing: {restaurant_name}")
         logger.info(f"📍 Address: {address}")
@@ -259,7 +259,7 @@ def handle_start_processing(data):
         restaurant_name = data.get("restaurant_name", "").strip()
         address = data.get("address", "").strip()
         phone = data.get("phone", "").strip()
-        min_quality_score = float(data.get("min_score", 7.0))
+        min_quality_score = float(data.get("min_score", 5.0))
         days_back = int(data.get("days_back", 30))
         
         if not all([restaurant_name, address, phone]):
