@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     max_verification_candidates: int = int(os.getenv("MAX_VERIFICATION_CANDIDATES", "8"))
     # Toggle author verification for Instagram shortcodes
     verify_author: bool = os.getenv("VERIFY_AUTHOR", "false").lower() == "true"
+    # Avoid using Instaloader GraphQL fallback in prod (prevents blocks)
+    disable_instaloader_fallback: bool = os.getenv("DISABLE_INSTALOADER_FALLBACK", "true").lower() == "true"
     
     # Logging and debug
     log_level: str = os.getenv("LOG_LEVEL", "INFO")

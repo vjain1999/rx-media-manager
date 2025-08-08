@@ -369,7 +369,11 @@ def fetch_instagram_videos(username: str, days_back: int = 30) -> List[Dict]:
         videos = _discover_shortcodes_via_search(username, days_back)
         if videos:
             return videos
-        print("   ⚠️ Web search returned no shortcodes, falling back to Instaloader")
+        print("   ⚠️ Web search returned no shortcodes")
+        if settings.disable_instaloader_fallback:
+            print("   🚫 Instaloader fallback disabled by config (DISABLE_INSTALOADER_FALLBACK=true)")
+            return []
+        print("   ↩️ Falling back to Instaloader")
 
     fetcher = InstagramVideoFetcher()
     videos = fetcher.get_all_videos(username, days_back)
@@ -407,7 +411,7 @@ def _discover_shortcodes_via_search(username: str, days_back: int = 30) -> List[
     seen: set = set()
     for q in queries:
         try:
-            resp = app.search(query=q, limit=5)
+            resp = app.search(query=q, limit=3)
 
             # Firecrawl SDK may return a Pydantic model (e.g., SearchResponse) or a dict
             if resp is None:
@@ -439,7 +443,7 @@ def _discover_shortcodes_via_search(username: str, days_back: int = 30) -> List[
 
     # Vet shortcodes to ensure they are actually videos using yt-dlp metadata (no download)
     # Reduce fan-out: limit number of candidates to verify
-    max_cands = max(1, settings.max_verification_candidates)
+    max_cands = max(1, min(settings.max_verification_candidates, 4))
     candidates = found[:max_cands]
     print(f"   🔎 Verifying {len(candidates)} shortcodes are videos (limited to {max_cands})...")
     verified: List[Dict] = []
@@ -481,6 +485,10 @@ def _is_shortcode_video(shortcode: str) -> bool:
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
                 "Accept-Language": "en-US,en;q=0.9",
             },
+            # Conservative retries with backoff within yt-dlp
+            "retries": 2,
+            "fragment_retries": 1,
+            "socket_timeout": 15,
         }
         # Attach cookies if available (prefer explicit env; fallback to default path used in prod)
         default_cookies_path = "/app/secrets/insta_cookies.txt"
@@ -530,6 +538,9 @@ def _is_shortcode_by_author(shortcode: str, username: str) -> bool:
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
                 "Accept-Language": "en-US,en;q=0.9",
             },
+            "retries": 2,
+            "fragment_retries": 1,
+            "socket_timeout": 15,
         }
         if settings.ig_cookies_file and os.path.exists(settings.ig_cookies_file):
             ydl_opts["cookiefile"] = settings.ig_cookies_file

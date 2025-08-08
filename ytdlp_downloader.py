@@ -40,7 +40,10 @@ def download_instagram_video_ytdlp(shortcode: str, download_path: str = "downloa
             'http_headers': {
                 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
                 'Accept-Language': 'en-US,en;q=0.9',
-            }
+            },
+            'retries': 2,
+            'fragment_retries': 1,
+            'socket_timeout': 15,
         }
 
         # Prefer cookies-based auth for Instagram (username/password not supported by yt-dlp)
@@ -60,8 +63,8 @@ def download_instagram_video_ytdlp(shortcode: str, download_path: str = "downloa
         else:
             print("   ⚠️ No Instagram cookies configured (set IG_COOKIES_FILE or IG_COOKIES_FROM_BROWSER)")
         
-        # Add random delay to avoid rate limiting
-        delay = random.uniform(1, 3)
+        # Add random delay to avoid rate limiting (slower in prod)
+        delay = random.uniform(2.5, 6.0)
         print(f"   ⏳ Rate limiting: waiting {delay:.1f}s before download...")
         time.sleep(delay)
         
@@ -70,7 +73,10 @@ def download_instagram_video_ytdlp(shortcode: str, download_path: str = "downloa
             try:
                 ydl.download([instagram_url])
             except yt_dlp.DownloadError as e:
-                # Retry with reel URL variant
+                # Backoff before retry variant
+                backoff = random.uniform(2.0, 5.0)
+                print(f"   🔁 Retry after {backoff:.1f}s as reel URL due to error: {e}")
+                time.sleep(backoff)
                 reel_url = f"https://www.instagram.com/reel/{shortcode}/"
                 print(f"   🔁 Retrying as reel URL: {reel_url}")
                 ydl.download([reel_url])
