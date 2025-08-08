@@ -399,16 +399,26 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('DEBUG', 'false').lower() == 'true'
     
-    # Decode cookies from base64 env if provided (IG_COOKIES_B64)
+    # Decode cookies from base64 env if provided (IG_COOKIES_B64 or chunked IG_COOKIES_B64_1..N)
     try:
         import base64, os
         cookies_b64 = os.environ.get('IG_COOKIES_B64', '')
+        # Support chunked variables to bypass platform length limits
+        if not cookies_b64:
+            parts = []
+            for i in range(1, 11):  # up to 10 parts
+                part = os.environ.get(f'IG_COOKIES_B64_{i}', '')
+                if not part:
+                    break
+                parts.append(part.strip())
+            if parts:
+                cookies_b64 = ''.join(parts)
         cookies_path = os.environ.get('IG_COOKIES_FILE', '') or '/app/secrets/insta_cookies.txt'
         if cookies_b64 and cookies_path and not os.path.exists(cookies_path):
             os.makedirs(os.path.dirname(cookies_path), exist_ok=True)
             with open(cookies_path, 'wb') as f:
                 f.write(base64.b64decode(cookies_b64))
-            logger.info(f"🍪 Wrote Instagram cookies to {cookies_path} from IG_COOKIES_B64")
+            logger.info(f"🍪 Wrote Instagram cookies to {cookies_path} from IG_COOKIES_B64{' parts' if 'IG_COOKIES_B64_1' in os.environ else ''}")
     except Exception:
         logger.exception("Failed to decode IG_COOKIES_B64")
     
