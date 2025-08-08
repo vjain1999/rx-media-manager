@@ -414,11 +414,20 @@ if __name__ == '__main__':
             if parts:
                 cookies_b64 = ''.join(parts)
         cookies_path = os.environ.get('IG_COOKIES_FILE', '') or '/app/secrets/insta_cookies.txt'
-        if cookies_b64 and cookies_path and not os.path.exists(cookies_path):
+        if cookies_b64 and cookies_path:
             os.makedirs(os.path.dirname(cookies_path), exist_ok=True)
+            decoded = base64.b64decode(cookies_b64)
             with open(cookies_path, 'wb') as f:
-                f.write(base64.b64decode(cookies_b64))
-            logger.info(f"🍪 Wrote Instagram cookies to {cookies_path} from IG_COOKIES_B64{' parts' if 'IG_COOKIES_B64_1' in os.environ else ''}")
+                f.write(decoded)
+            logger.info(
+                "🍪 Wrote Instagram cookies to %s (%d base64 chars, %d bytes decoded)%s",
+                cookies_path,
+                len(cookies_b64),
+                len(decoded),
+                " from chunked vars" if os.environ.get('IG_COOKIES_B64_1') else ""
+            )
+        else:
+            logger.info("🍪 IG_COOKIES_B64 not provided; skipping cookie file write. Using existing path: %s", cookies_path)
     except Exception:
         logger.exception("Failed to decode IG_COOKIES_B64")
     
