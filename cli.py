@@ -57,14 +57,14 @@ def main():
     single_parser.add_argument('--address', required=True, help='Restaurant address')
     single_parser.add_argument('--phone', required=True, help='Restaurant phone number')
     single_parser.add_argument('--days-back', type=int, default=30, help='Days back to search for videos')
-    single_parser.add_argument('--min-score', type=float, default=7.0, help='Minimum quality score for approval')
+    single_parser.add_argument('--min-score', type=float, default=5.0, help='Minimum quality score for approval')
     single_parser.add_argument('--output', help='Output file for results')
     
     # Batch processing command
     batch_parser = subparsers.add_parser('batch', help='Process restaurants from file')
     batch_parser.add_argument('--file', required=True, help='JSON file with restaurant data')
     batch_parser.add_argument('--days-back', type=int, default=30, help='Days back to search for videos')
-    batch_parser.add_argument('--min-score', type=float, default=7.0, help='Minimum quality score for approval')
+    batch_parser.add_argument('--min-score', type=float, default=5.0, help='Minimum quality score for approval')
     batch_parser.add_argument('--output', help='Output file for results')
     
     args = parser.parse_args()

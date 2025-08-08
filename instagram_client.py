@@ -444,11 +444,16 @@ def _discover_shortcodes_via_search(username: str, days_back: int = 30) -> List[
     # Vet shortcodes to ensure they are actually videos using yt-dlp metadata (no download)
     # Reduce fan-out: limit number of candidates to verify
     max_cands = max(1, min(settings.max_verification_candidates, 4))
+    # Shuffle to avoid deterministic probing order
+    import random as _random
+    _random.shuffle(found)
     candidates = found[:max_cands]
     print(f"   🔎 Verifying {len(candidates)} shortcodes are videos (limited to {max_cands})...")
     verified: List[Dict] = []
     for item in candidates:
         sc = item["shortcode"]
+        # Human-like jitter between probes
+        time.sleep(_random.uniform(1.0, 2.5))
         is_video = _is_shortcode_video(sc)
         is_author_ok = True if not settings.verify_author else _is_shortcode_by_author(sc, username)
         if is_video and is_author_ok:
