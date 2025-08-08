@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     
     # Rate limiting settings (more conservative to avoid detection)
     instagram_delay_seconds: float = 6.0  # Slightly slower pacing
-    max_videos_per_restaurant: int = 5     # Raise cap to review more videos
+    max_videos_per_restaurant: int = int(os.getenv("MAX_VIDEOS_PER_RESTAURANT", "10"))     # Target more videos per run
     max_concurrent_downloads: int = 2      # Reduced from 3
     instagram_max_posts_check: int = 30    # Limit posts to check
     instagram_retry_attempts: int = 3      # Number of retry attempts

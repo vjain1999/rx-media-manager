@@ -411,7 +411,7 @@ def _discover_shortcodes_via_search(username: str, days_back: int = 30) -> List[
     seen: set = set()
     for q in queries:
         try:
-            resp = app.search(query=q, limit=3)
+            resp = app.search(query=q, limit=5)
 
             # Firecrawl SDK may return a Pydantic model (e.g., SearchResponse) or a dict
             if resp is None:
@@ -443,7 +443,8 @@ def _discover_shortcodes_via_search(username: str, days_back: int = 30) -> List[
 
     # Vet shortcodes to ensure they are actually videos using yt-dlp metadata (no download)
     # Reduce fan-out: limit number of candidates to verify
-    max_cands = max(1, min(settings.max_verification_candidates, 4))
+    # Probe up to 10 but still conservative with delays
+    max_cands = max(1, min(settings.max_verification_candidates, 10))
     # Shuffle to avoid deterministic probing order
     import random as _random
     _random.shuffle(found)
