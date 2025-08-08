@@ -44,9 +44,13 @@ def download_instagram_video_ytdlp(shortcode: str, download_path: str = "downloa
         }
 
         # Prefer cookies-based auth for Instagram (username/password not supported by yt-dlp)
+        default_cookies_path = "/app/secrets/insta_cookies.txt"
         if settings.ig_cookies_file and os.path.exists(settings.ig_cookies_file):
             print(f"   🍪 Using cookies file: {settings.ig_cookies_file}")
             ydl_opts['cookiefile'] = settings.ig_cookies_file
+        elif os.path.exists(default_cookies_path):
+            print(f"   🍪 Using cookies file: {default_cookies_path}")
+            ydl_opts['cookiefile'] = default_cookies_path
         elif settings.ig_cookies_from_browser:
             parts = settings.ig_cookies_from_browser.split(':', 1)
             browser = parts[0].strip()

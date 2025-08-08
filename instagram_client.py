@@ -482,9 +482,12 @@ def _is_shortcode_video(shortcode: str) -> bool:
                 "Accept-Language": "en-US,en;q=0.9",
             },
         }
-        # Attach cookies if available
+        # Attach cookies if available (prefer explicit env; fallback to default path used in prod)
+        default_cookies_path = "/app/secrets/insta_cookies.txt"
         if settings.ig_cookies_file and os.path.exists(settings.ig_cookies_file):
             ydl_opts["cookiefile"] = settings.ig_cookies_file
+        elif os.path.exists("/app/secrets/insta_cookies.txt"):
+            ydl_opts["cookiefile"] = "/app/secrets/insta_cookies.txt"
         elif settings.ig_cookies_from_browser:
             # Support formats like "chrome" or "chrome:Default"
             parts = settings.ig_cookies_from_browser.split(":", 1)
@@ -530,6 +533,8 @@ def _is_shortcode_by_author(shortcode: str, username: str) -> bool:
         }
         if settings.ig_cookies_file and os.path.exists(settings.ig_cookies_file):
             ydl_opts["cookiefile"] = settings.ig_cookies_file
+        elif os.path.exists("/app/secrets/insta_cookies.txt"):
+            ydl_opts["cookiefile"] = "/app/secrets/insta_cookies.txt"
         elif settings.ig_cookies_from_browser:
             parts = settings.ig_cookies_from_browser.split(":", 1)
             browser = parts[0].strip()
