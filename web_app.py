@@ -399,6 +399,19 @@ if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug_mode = os.environ.get('DEBUG', 'false').lower() == 'true'
     
+    # Decode cookies from base64 env if provided (IG_COOKIES_B64)
+    try:
+        import base64, os
+        cookies_b64 = os.environ.get('IG_COOKIES_B64', '')
+        cookies_path = os.environ.get('IG_COOKIES_FILE', '') or '/app/secrets/insta_cookies.txt'
+        if cookies_b64 and cookies_path and not os.path.exists(cookies_path):
+            os.makedirs(os.path.dirname(cookies_path), exist_ok=True)
+            with open(cookies_path, 'wb') as f:
+                f.write(base64.b64decode(cookies_b64))
+            logger.info(f"🍪 Wrote Instagram cookies to {cookies_path} from IG_COOKIES_B64")
+    except Exception:
+        logger.exception("Failed to decode IG_COOKIES_B64")
+    
     logger.info("🚀 Starting Restaurant Video Analyzer Web UI...")
     logger.info(f"🌍 Environment: {'Development' if debug_mode else 'Production'}")
     logger.info(f"📱 Server will run on port: {port}")

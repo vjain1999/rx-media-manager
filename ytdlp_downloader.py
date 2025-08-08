@@ -31,34 +31,45 @@ def download_instagram_video_ytdlp(shortcode: str, download_path: str = "downloa
         # Configure yt-dlp options
         ydl_opts = {
             'outtmpl': os.path.join(download_path, f'{shortcode}.%(ext)s'),
-            'format': 'best[ext=mp4]',  # Prefer mp4 format
-            'quiet': False,  # Set to True to reduce output
+            'format': 'best[ext=mp4]/best',  # Prefer mp4, fallback to best
+            'quiet': False,
             'no_warnings': False,
             'extract_flat': False,
             'writethumbnail': False,
             'writeinfojson': False,
-            # Headers to avoid detection
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9',
             }
         }
-        
-        # Add Instagram authentication if credentials are available
-        if settings.instagram_username and settings.instagram_password:
-            print(f"   🔐 Using Instagram credentials for {settings.instagram_username}")
-            ydl_opts['username'] = settings.instagram_username
-            ydl_opts['password'] = settings.instagram_password
+
+        # Prefer cookies-based auth for Instagram (username/password not supported by yt-dlp)
+        if settings.ig_cookies_file and os.path.exists(settings.ig_cookies_file):
+            print(f"   🍪 Using cookies file: {settings.ig_cookies_file}")
+            ydl_opts['cookiefile'] = settings.ig_cookies_file
+        elif settings.ig_cookies_from_browser:
+            parts = settings.ig_cookies_from_browser.split(':', 1)
+            browser = parts[0].strip()
+            profile = parts[1].strip() if len(parts) > 1 and parts[1] else None
+            ydl_opts['cookiesfrombrowser'] = (browser,) if not profile else (browser, profile)
+            print(f"   🍪 Using cookies from browser: {settings.ig_cookies_from_browser}")
         else:
-            print("   ⚠️ No Instagram credentials configured - downloads may fail")
+            print("   ⚠️ No Instagram cookies configured (set IG_COOKIES_FILE or IG_COOKIES_FROM_BROWSER)")
         
         # Add random delay to avoid rate limiting
         delay = random.uniform(1, 3)
         print(f"   ⏳ Rate limiting: waiting {delay:.1f}s before download...")
         time.sleep(delay)
         
-        # Download with yt-dlp
+        # Download with yt-dlp. Try /p first, then /reel as fallback.
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([instagram_url])
+            try:
+                ydl.download([instagram_url])
+            except yt_dlp.DownloadError as e:
+                # Retry with reel URL variant
+                reel_url = f"https://www.instagram.com/reel/{shortcode}/"
+                print(f"   🔁 Retrying as reel URL: {reel_url}")
+                ydl.download([reel_url])
         
         print(f"   ✅ Successfully downloaded video {shortcode}")
         return True

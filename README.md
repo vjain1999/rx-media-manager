@@ -1,3 +1,20 @@
+Production Instagram cookies setup
+
+1) Export cookies from a logged-in browser (Netscape format)
+   - Use a cookies.txt exporter extension while logged into instagram.com
+   - Save as insta_cookies.txt
+
+2) Store in Railway securely
+   - Option A (recommended): Add a Railway Volume mounted at /app/secrets and upload insta_cookies.txt there
+   - Option B: Add a Railway variable IG_COOKIES_B64 with base64 of the file; decode at startup to /app/secrets/insta_cookies.txt
+
+3) Configure environment variables
+   - IG_COOKIES_FILE=/app/secrets/insta_cookies.txt
+   - SKIP_IG_GRAPHQL=true
+
+4) Optional: limit verification fan-out
+   - MAX_VERIFICATION_CANDIDATES=6
+
 # Restaurant Video Analysis System
 
 An automated system that finds, analyzes, and approves restaurant Instagram videos for DoorDash store pages.

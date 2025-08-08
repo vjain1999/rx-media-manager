@@ -1,0 +1,74 @@
+{
+  "restaurant_name": "Crepevine",
+  "address": "300 Castro St, Mountain View, CA 94041",
+  "phone": "+19194484511",
+  "timestamp": "2025-08-07T21:36:11.634744",
+  "instagram_handle": "CrepevineRestaurants",
+  "videos_found": 3,
+  "videos_downloaded": 3,
+  "videos_approved": 2,
+  "sms_sent": true,
+  "approved_videos": [
+    {
+      "shortcode": "DIuDywsTi26",
+      "original_url": "https://www.instagram.com/p/DIuDywsTi26/",
+      "local_path": "downloads/videos/DIuDywsTi26.mp4",
+      "download_success": true,
+      "analysis": {
+        "food_quality": 9,
+        "visual_appeal": 8,
+        "professionalism": 8,
+        "brand_safety": 10,
+        "marketing_value": 9,
+        "overall_score": 8.8,
+        "recommendation": "APPROVE",
+        "reasoning": "The video frames showcase appetizing and visually appealing food items with good lighting and composition. The content is appropriate for a food delivery platform and effectively highlights the menu items, making it attractive for potential customers.",
+        "highlights": [
+          "Appetizing presentation",
+          "Good lighting and composition",
+          "Clear branding"
+        ],
+        "food_items": [
+          "Smashburger",
+          "Fries",
+          "Strawberry or Raspberry Matcha Latte"
+        ],
+        "video_shortcode": "DIuDywsTi26",
+        "video_url": "",
+        "analysis_timestamp": 1754617019.8234482,
+        "frames_analyzed": 3
+      }
+    },
+    {
+      "shortcode": "DJXkrbwRq2z",
+      "original_url": "https://www.instagram.com/p/DJXkrbwRq2z/",
+      "local_path": "downloads/videos/DJXkrbwRq2z.mp4",
+      "download_success": true,
+      "analysis": {
+        "food_quality": 9,
+        "visual_appeal": 8,
+        "professionalism": 8,
+        "brand_safety": 10,
+        "marketing_value": 9,
+        "overall_score": 8.8,
+        "recommendation": "APPROVE",
+        "reasoning": "The video frames showcase appetizing and well-presented food, with good lighting and composition. The content is appropriate for a food delivery platform and effectively highlights the product, making it appealing to potential customers.",
+        "highlights": [
+          "Appetizing presentation",
+          "Good lighting and composition",
+          "Clear branding"
+        ],
+        "food_items": [
+          "Smash Burger",
+          "Fries",
+          "Pickle"
+        ],
+        "video_shortcode": "DJXkrbwRq2z",
+        "video_url": "",
+        "analysis_timestamp": 1754617029.042773,
+        "frames_analyzed": 3
+      }
+    }
+  ],
+  "errors": []
+}

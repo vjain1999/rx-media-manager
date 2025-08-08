@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from config import settings
 import os
 import requests
+import re
+from yt_dlp import YoutubeDL
 
 class InstagramVideoFetcher:
     """Fetch Instagram videos using instaloader with rate limiting protection."""
@@ -361,8 +363,210 @@ def fetch_instagram_videos(username: str, days_back: int = 30) -> List[Dict]:
     Returns:
         List of video metadata dictionaries
     """
+    # Optional fast path: skip Instagram GraphQL and discover shortcodes via web search
+    if settings.skip_ig_graphql:
+        print("⚙️ SKIP_IG_GRAPHQL enabled – using web search for shortcodes")
+        videos = _discover_shortcodes_via_search(username, days_back)
+        if videos:
+            return videos
+        print("   ⚠️ Web search returned no shortcodes, falling back to Instaloader")
+
     fetcher = InstagramVideoFetcher()
-    return fetcher.get_all_videos(username, days_back)
+    videos = fetcher.get_all_videos(username, days_back)
+    if not videos:
+        # Fallback: try web search-based discovery if GraphQL path yielded nothing
+        print("   ⚠️ No videos from GraphQL; attempting web search for shortcodes")
+        return _discover_shortcodes_via_search(username, days_back)
+    return videos
+
+def _discover_shortcodes_via_search(username: str, days_back: int = 30) -> List[Dict]:
+    """Discover recent Instagram post shortcodes for a user via web search (Firecrawl).
+
+    Returns minimal video dicts: shortcode, url, approximate date, flags.
+    """
+    try:
+        from firecrawl import FirecrawlApp
+    except Exception:
+        print("   ⚠️ Firecrawl not available for shortcode discovery")
+        return []
+
+    if not settings.firecrawl_api_key:
+        print("   ⚠️ FIRECRAWL_API_KEY not set")
+        return []
+
+    print(f"🔎 Discovering shortcodes via web search for @{username} (skip GraphQL)")
+    app = FirecrawlApp(api_key=settings.firecrawl_api_key)
+
+    queries = [
+        f"site:instagram.com/p {username}",
+        f"site:instagram.com/reel {username}",
+        f"{username} instagram"
+    ]
+
+    found: List[Dict] = []
+    seen: set = set()
+    for q in queries:
+        try:
+            resp = app.search(query=q, limit=5)
+
+            # Firecrawl SDK may return a Pydantic model (e.g., SearchResponse) or a dict
+            if resp is None:
+                items = []
+            elif hasattr(resp, "data"):
+                items = getattr(resp, "data", [])
+            elif isinstance(resp, dict):
+                items = resp.get("data", [])
+            else:
+                items = []
+
+            for item in items:
+                # item may be dict or model; support both
+                url = item.get("url", "") if isinstance(item, dict) else getattr(item, "url", "")
+                m = re.search(r"instagram\.com/(?:p|reel)/([A-Za-z0-9_-]+)/?", url)
+                if not m:
+                    continue
+                shortcode = m.group(1)
+                if shortcode in seen:
+                    continue
+                seen.add(shortcode)
+                found.append({
+                    "shortcode": shortcode,
+                    "url": f"https://www.instagram.com/p/{shortcode}/",
+                    "date": datetime.now(),  # approximate recency
+                })
+        except Exception as e:
+            print(f"   ❌ Firecrawl search failed: {e}")
+
+    # Vet shortcodes to ensure they are actually videos using yt-dlp metadata (no download)
+    # Reduce fan-out: limit number of candidates to verify
+    max_cands = max(1, settings.max_verification_candidates)
+    candidates = found[:max_cands]
+    print(f"   🔎 Verifying {len(candidates)} shortcodes are videos (limited to {max_cands})...")
+    verified: List[Dict] = []
+    for item in candidates:
+        sc = item["shortcode"]
+        is_video = _is_shortcode_video(sc)
+        is_author_ok = True if not settings.verify_author else _is_shortcode_by_author(sc, username)
+        if is_video and is_author_ok:
+            item.update({
+                "is_video": True,
+                "typename": "video",
+                "url": f"https://www.instagram.com/p/{sc}/",
+            })
+            verified.append(item)
+            if settings.verify_author:
+                print(f"      ✅ Video confirmed from @{username}: {sc}")
+            else:
+                print(f"      ✅ Video confirmed (author unchecked): {sc}")
+        else:
+            print(f"      ❌ Skipped (not video or not by @{username}): {sc}")
+
+    # Sort newest first and limit
+    verified.sort(key=lambda x: x["date"], reverse=True)
+    return verified[: settings.max_videos_per_restaurant]
+
+def _is_shortcode_video(shortcode: str) -> bool:
+    """Return True if shortcode URL resolves to a video according to yt-dlp formats metadata."""
+    try:
+        urls = [
+            f"https://www.instagram.com/p/{shortcode}/",
+            f"https://www.instagram.com/reel/{shortcode}/",
+        ]
+        ydl_opts = {
+            "skip_download": True,
+            "quiet": True,
+            "no_warnings": True,
+            # Modern desktop UA helps Instagram serve full responses
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        }
+        # Attach cookies if available
+        if settings.ig_cookies_file and os.path.exists(settings.ig_cookies_file):
+            ydl_opts["cookiefile"] = settings.ig_cookies_file
+        elif settings.ig_cookies_from_browser:
+            # Support formats like "chrome" or "chrome:Default"
+            parts = settings.ig_cookies_from_browser.split(":", 1)
+            browser = parts[0].strip()
+            profile = parts[1].strip() if len(parts) > 1 and parts[1] else None
+            # yt-dlp accepts variable-length tuple: (browser[, profile[, keyring[, browserdir]]])
+            ydl_opts["cookiesfrombrowser"] = (browser,) if not profile else (browser, profile)
+        ydl = YoutubeDL(ydl_opts)
+        for u in urls:
+            try:
+                info = ydl.extract_info(u, download=False)
+                if not info:
+                    continue
+                # Direct video
+                if info.get("formats"):
+                    return True
+                # Carousel/playlist: check entries for any video
+                entries = info.get("entries") or []
+                for entry in entries:
+                    if entry and entry.get("formats"):
+                        return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
+
+def _is_shortcode_by_author(shortcode: str, username: str) -> bool:
+    """Return True if yt-dlp reports the uploader as the given username."""
+    try:
+        urls = [
+            f"https://www.instagram.com/p/{shortcode}/",
+            f"https://www.instagram.com/reel/{shortcode}/",
+        ]
+        ydl_opts = {
+            "skip_download": True,
+            "quiet": True,
+            "no_warnings": True,
+            "http_headers": {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+        }
+        if settings.ig_cookies_file and os.path.exists(settings.ig_cookies_file):
+            ydl_opts["cookiefile"] = settings.ig_cookies_file
+        elif settings.ig_cookies_from_browser:
+            parts = settings.ig_cookies_from_browser.split(":", 1)
+            browser = parts[0].strip()
+            profile = parts[1].strip() if len(parts) > 1 and parts[1] else None
+            ydl_opts["cookiesfrombrowser"] = (browser,) if not profile else (browser, profile)
+        ydl = YoutubeDL(ydl_opts)
+        target = username.strip().lstrip('@').lower()
+        for u in urls:
+            try:
+                info = ydl.extract_info(u, download=False)
+                if not info:
+                    continue
+                # Check top-level
+                uploader = (info.get("uploader") or info.get("creator") or "").strip().lower()
+                uploader_id = (info.get("uploader_id") or info.get("channel_id") or "").strip().lower()
+                uploader_url = (info.get("uploader_url") or info.get("channel_url") or "").strip().lower()
+                def matches(u, uid, url):
+                    return (
+                        (u == target) or
+                        (uid == target) or
+                        (target and url and target in url)
+                    )
+                if matches(uploader, uploader_id, uploader_url):
+                    return True
+                # Check entries for carousels
+                entries = info.get("entries") or []
+                for entry in entries:
+                    eu = (entry.get("uploader") or entry.get("creator") or "").strip().lower() if isinstance(entry, dict) else ""
+                    euid = (entry.get("uploader_id") or entry.get("channel_id") or "").strip().lower() if isinstance(entry, dict) else ""
+                    eurl = (entry.get("uploader_url") or entry.get("channel_url") or "").strip().lower() if isinstance(entry, dict) else ""
+                    if matches(eu, euid, eurl):
+                        return True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return False
 
 def download_instagram_video(shortcode: str, download_path: str = "downloads/videos") -> bool:
     """
