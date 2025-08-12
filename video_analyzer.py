@@ -170,7 +170,6 @@ class VideoQualityAnalyzer:
     def _create_analysis_prompt(self, video_info: Dict) -> str:
         """Create analysis prompt for the LLM."""
         caption = video_info.get('caption', 'No caption')
-        
         prompt = f"""
 Analyze these video frames from a restaurant's Instagram post for use on a DoorDash store page.
 
