@@ -3,6 +3,7 @@ class RestaurantAnalyzer {
     constructor() {
         this.socket = io();
         this.currentResults = null;
+        this.initTabs();
         this.initEventListeners();
         this.initSocketListeners();
     }
@@ -23,6 +24,24 @@ class RestaurantAnalyzer {
         document.getElementById('closeModal').addEventListener('click', () => {
             this.hideModal();
         });
+
+        // IG handle form
+        const igForm = document.getElementById('igForm');
+        if (igForm) {
+            igForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.findIGHandle();
+            });
+        }
+
+        // Frames form
+        const framesForm = document.getElementById('framesForm');
+        if (framesForm) {
+            framesForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.analyzeFrames();
+            });
+        }
     }
 
     initSocketListeners() {
@@ -37,6 +56,32 @@ class RestaurantAnalyzer {
         this.socket.on('processing_complete', (results) => {
             this.showResults(results);
         });
+    }
+
+    initTabs() {
+        const tabs = {
+            tabBtnFull: 'tab-full',
+            tabBtnIG: 'tab-ig',
+            tabBtnFrames: 'tab-frames'
+        };
+        const setActive = (btnId) => {
+            Object.entries(tabs).forEach(([buttonId, tabId]) => {
+                const btn = document.getElementById(buttonId);
+                const tab = document.getElementById(tabId);
+                if (!btn || !tab) return;
+                const active = buttonId === btnId;
+                tab.style.display = active ? 'grid' : 'none';
+                btn.classList.toggle('bg-blue-600', active);
+                btn.classList.toggle('text-white', active);
+                btn.classList.toggle('text-gray-700', !active);
+            });
+        };
+        ['tabBtnFull','tabBtnIG','tabBtnFrames'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', () => setActive(id));
+        });
+        // Default
+        setActive('tabBtnFull');
     }
 
     startAnalysis() {
@@ -65,6 +110,70 @@ class RestaurantAnalyzer {
 
         // Start processing via WebSocket
         this.socket.emit("start_processing", formData);    }
+
+    findIGHandle() {
+        const name = document.getElementById('igRestaurantName').value.trim();
+        const address = document.getElementById('igAddress').value.trim();
+        const phone = (document.getElementById('igPhone').value || '').trim();
+        if (!name || !address) {
+            this.showModal('error', 'Missing info', 'Please enter restaurant name and address.');
+            return;
+        }
+        const btn = document.getElementById('igFindBtn');
+        const original = btn.innerHTML;
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Searching...';
+        fetch('/api/find_instagram', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ restaurant_name: name, address, phone })
+        })
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('igResult');
+            if (data.error) {
+                el.innerHTML = `<div class="text-red-600">${data.error}</div>`;
+            } else {
+                const handle = data.instagram_handle;
+                const url = handle ? `https://www.instagram.com/${handle}/` : '';
+                el.innerHTML = handle ? `Found: <a href="${url}" target="_blank" class="text-blue-600 hover:underline">@${handle}</a>` : 'No handle found';
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            this.showModal('error', 'Error', 'Failed to search.');
+        })
+        .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    }
+
+    analyzeFrames() {
+        const fileInput = document.getElementById('videoFile');
+        const caption = (document.getElementById('videoCaption').value || '').trim();
+        if (!fileInput.files || fileInput.files.length === 0) {
+            this.showModal('error', 'Missing file', 'Please choose a video file.');
+            return;
+        }
+        const btn = document.getElementById('framesAnalyzeBtn');
+        const original = btn.innerHTML;
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Analyzing...';
+        const form = new FormData();
+        form.append('video', fileInput.files[0]);
+        form.append('caption', caption);
+        fetch('/api/analyze_frames', { method: 'POST', body: form })
+            .then(r => r.json())
+            .then(data => {
+                const el = document.getElementById('framesResult');
+                if (data.error) {
+                    el.innerHTML = `<div class="text-red-600">${data.error}</div>`;
+                } else {
+                    el.innerHTML = `<pre class="text-sm bg-gray-50 p-3 rounded-lg overflow-x-auto">${JSON.stringify(data, null, 2)}</pre>`;
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                this.showModal('error', 'Error', 'Frame analysis failed.');
+            })
+            .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    }
 
     updateProgress(data) {
         const { step, status, message, progress_percent, data: stepData } = data;

@@ -66,7 +66,17 @@
     </header>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Tabs -->
+        <div class="mb-6">
+            <div class="inline-flex rounded-xl overflow-hidden bg-white shadow">
+                <button id="tabBtnFull" class="px-4 py-2 text-sm font-medium bg-blue-600 text-white">Full Pipeline</button>
+                <button id="tabBtnIG" class="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">IG Handle Finder</button>
+                <button id="tabBtnFrames" class="px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100">Frame Analyzer</button>
+            </div>
+        </div>
+
+        <!-- Full Pipeline Tab -->
+        <div id="tab-full" class="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
             <!-- Input Form -->
             <div class="lg:col-span-1">
@@ -168,6 +178,80 @@
                             Send SMS to Restaurant
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- IG Handle Finder Tab -->
+        <div id="tab-ig" class="grid grid-cols-1 lg:grid-cols-3 gap-8" style="display: none;">
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-2xl shadow-xl p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-6 flex items-center">
+                        <i class="fab fa-instagram text-pink-500 mr-3"></i>
+                        Find Instagram Handle
+                    </h2>
+                    <form id="igForm" class="space-y-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Restaurant Name</label>
+                            <input type="text" id="igRestaurantName" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="e.g., Crepevine" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Address</label>
+                            <input type="text" id="igAddress" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Street, City, State" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Phone (optional)</label>
+                            <input type="tel" id="igPhone" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="+1 ...">
+                        </div>
+                        <button type="submit" id="igFindBtn" class="w-full bg-gradient-to-r from-pink-500 to-rose-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-pink-600 hover:to-rose-700 transition-all">
+                            <i class="fas fa-search mr-2"></i>
+                            Find Handle
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-2xl shadow-xl p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-6 flex items-center">
+                        <i class="fas fa-info-circle text-blue-500 mr-3"></i>
+                        Result
+                    </h2>
+                    <div id="igResult" class="text-gray-700"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Frame Analyzer Tab -->
+        <div id="tab-frames" class="grid grid-cols-1 lg:grid-cols-3 gap-8" style="display: none;">
+            <div class="lg:col-span-1">
+                <div class="bg-white rounded-2xl shadow-xl p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-6 flex items-center">
+                        <i class="fas fa-film text-indigo-500 mr-3"></i>
+                        Analyze Video Frames
+                    </h2>
+                    <form id="framesForm" class="space-y-6">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Upload Video</label>
+                            <input type="file" id="videoFile" accept="video/*" class="w-full" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Caption (optional)</label>
+                            <input type="text" id="videoCaption" class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Video caption or context">
+                        </div>
+                        <button type="submit" id="framesAnalyzeBtn" class="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-indigo-600 hover:to-purple-700 transition-all">
+                            <i class="fas fa-magic mr-2"></i>
+                            Analyze
+                        </button>
+                    </form>
+                </div>
+            </div>
+            <div class="lg:col-span-2">
+                <div class="bg-white rounded-2xl shadow-xl p-6">
+                    <h2 class="text-xl font-semibold text-gray-900 mb-6 flex items-center">
+                        <i class="fas fa-chart-bar text-green-500 mr-3"></i>
+                        Analysis
+                    </h2>
+                    <div id="framesResult" class="text-gray-700"></div>
                 </div>
             </div>
         </div>

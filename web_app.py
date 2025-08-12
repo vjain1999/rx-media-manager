@@ -14,6 +14,8 @@ import time
 import json
 import os
 from main import RestaurantVideoProcessor, find_restaurant_instagram, fetch_instagram_videos, analyze_restaurant_videos, notify_restaurant
+from video_analyzer import VideoQualityAnalyzer
+from config import settings
 from sms_notifier import RestaurantNotifier
 
 # Configure detailed logging
@@ -248,6 +250,53 @@ def index():
     """Serve the main web interface"""
     logger.info("🌐 Serving main web interface")
     return render_template('index.html')
+
+@app.route('/api/find_instagram', methods=['POST'])
+def api_find_instagram():
+    try:
+        data = request.get_json()
+        restaurant_name = (data.get('restaurant_name') or '').strip()
+        address = (data.get('address') or '').strip()
+        phone = (data.get('phone') or '').strip()
+        if not restaurant_name or not address:
+            return jsonify({'error': 'Missing restaurant_name or address'}), 400
+        handle = find_restaurant_instagram(restaurant_name, address, phone)
+        if not handle:
+            return jsonify({'instagram_handle': None, 'message': 'No handle found'}), 200
+        return jsonify({'instagram_handle': handle})
+    except Exception as e:
+        logger.exception('find_instagram API failed')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/analyze_frames', methods=['POST'])
+def api_analyze_frames():
+    try:
+        if 'video' not in request.files:
+            return jsonify({'error': 'No video file uploaded'}), 400
+        file = request.files['video']
+        caption = request.form.get('caption', '')
+        if file.filename == '':
+            return jsonify({'error': 'Empty filename'}), 400
+
+        # Save to temp path in configured videos dir
+        save_dir = settings.videos_dir
+        save_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = os.path.join(str(save_dir), file.filename)
+        file.save(temp_path)
+
+        analyzer = VideoQualityAnalyzer()
+        analysis = analyzer.analyze_video_quality({'local_path': temp_path, 'caption': caption})
+
+        # Optionally remove uploaded file after analysis
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+
+        return jsonify(analysis)
+    except Exception as e:
+        logger.exception('analyze_frames API failed')
+        return jsonify({'error': str(e)}), 500
 
 @socketio.on('start_processing')
 @socketio.on("start_processing")
