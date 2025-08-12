@@ -16,6 +16,8 @@ import os
 from main import RestaurantVideoProcessor, find_restaurant_instagram, fetch_instagram_videos, analyze_restaurant_videos, notify_restaurant
 from video_analyzer import VideoQualityAnalyzer
 from config import settings
+import csv
+import io
 from sms_notifier import RestaurantNotifier
 
 # Configure detailed logging
@@ -296,6 +298,67 @@ def api_analyze_frames():
         return jsonify(analysis)
     except Exception as e:
         logger.exception('analyze_frames API failed')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk_find_instagram', methods=['POST'])
+def api_bulk_find_instagram():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        file = request.files['file']
+        if not file.filename.lower().endswith('.csv'):
+            return jsonify({'error': 'Please upload a .csv file'}), 400
+
+        # Read CSV
+        stream = io.StringIO(file.stream.read().decode('utf-8', errors='ignore'))
+        reader = csv.DictReader(stream)
+        required_cols = {'business_id', 'restaurant_name', 'address'}
+        if not required_cols.issubset({c.strip() for c in reader.fieldnames or []}):
+            return jsonify({'error': 'CSV must include columns: business_id, restaurant_name, address'}), 400
+
+        results = []
+        for row in reader:
+            business_id = (row.get('business_id') or '').strip()
+            name = (row.get('restaurant_name') or '').strip()
+            address = (row.get('address') or '').strip()
+            phone = (row.get('phone') or '').strip()
+            if not business_id or not name or not address:
+                results.append({
+                    'business_id': business_id,
+                    'restaurant_name': name,
+                    'address': address,
+                    'phone': phone,
+                    'instagram_handle': '',
+                    'status': 'error',
+                    'message': 'Missing required fields'
+                })
+                continue
+
+            try:
+                handle = find_restaurant_instagram(name, address, phone)
+                results.append({
+                    'business_id': business_id,
+                    'restaurant_name': name,
+                    'address': address,
+                    'phone': phone,
+                    'instagram_handle': handle or '',
+                    'status': 'ok' if handle else 'not_found',
+                    'message': '' if handle else 'No handle found'
+                })
+            except Exception as e:
+                results.append({
+                    'business_id': business_id,
+                    'restaurant_name': name,
+                    'address': address,
+                    'phone': phone,
+                    'instagram_handle': '',
+                    'status': 'error',
+                    'message': str(e)
+                })
+
+        return jsonify({'results': results})
+    except Exception as e:
+        logger.exception('bulk_find_instagram API failed')
         return jsonify({'error': str(e)}), 500
 
 @socketio.on('start_processing')

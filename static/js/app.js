@@ -42,6 +42,16 @@ class RestaurantAnalyzer {
                 this.analyzeFrames();
             });
         }
+
+        // Bulk IG upload
+        const bulkBtn = document.getElementById('igBulkUploadBtn');
+        if (bulkBtn) {
+            bulkBtn.addEventListener('click', () => this.processBulkIG());
+        }
+        const downloadBtn = document.getElementById('igBulkDownloadBtn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', () => this.downloadBulkCSV());
+        }
     }
 
     initSocketListeners() {
@@ -173,6 +183,65 @@ class RestaurantAnalyzer {
                 this.showModal('error', 'Error', 'Frame analysis failed.');
             })
             .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    }
+
+    processBulkIG() {
+        const fileInput = document.getElementById('igBulkFile');
+        const file = fileInput && fileInput.files && fileInput.files[0];
+        if (!file) {
+            this.showModal('error', 'Missing file', 'Please choose a CSV file.');
+            return;
+        }
+        const btn = document.getElementById('igBulkUploadBtn');
+        const original = btn.innerHTML;
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+        const form = new FormData();
+        form.append('file', file);
+        fetch('/api/bulk_find_instagram', { method: 'POST', body: form })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    this.showModal('error', 'Bulk Error', data.error);
+                    return;
+                }
+                this._bulkResults = data.results || [];
+                const el = document.getElementById('igBulkResult');
+                el.innerHTML = this.renderBulkTable(this._bulkResults);
+                const dlBtn = document.getElementById('igBulkDownloadBtn');
+                if (dlBtn) dlBtn.classList.remove('hidden');
+            })
+            .catch(err => {
+                console.error(err);
+                this.showModal('error', 'Error', 'Bulk processing failed.');
+            })
+            .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    }
+
+    renderBulkTable(rows) {
+        if (!rows || rows.length === 0) return '<div class="text-gray-500">No results.</div>';
+        const headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message'];
+        const thead = '<thead><tr>' + headers.map(h => `<th class="px-3 py-2 text-left border-b">${h}</th>`).join('') + '</tr></thead>';
+        const tbody = '<tbody>' + rows.map(r => '<tr>' + headers.map(h => `<td class="px-3 py-2 border-b">${(r[h] ?? '').toString()}</td>`).join('') + '</tr>').join('') + '</tbody>';
+        return `<table class="min-w-full">${thead}${tbody}</table>`;
+    }
+
+    downloadBulkCSV() {
+        const rows = this._bulkResults || [];
+        if (!rows.length) return;
+        const headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message'];
+        const csv = [headers.join(',')].concat(rows.map(r => headers.map(h => {
+            const v = (r[h] ?? '').toString().replace(/"/g, '""');
+            return '"' + v + '"';
+        }).join(','))).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ig_handles.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 
     updateProgress(data) {
