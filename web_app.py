@@ -19,6 +19,8 @@ from config import settings
 import csv
 import io
 from web_search import RestaurantInstagramFinder
+import uuid
+import time as _time
 from sms_notifier import RestaurantNotifier
 
 # Configure detailed logging
@@ -318,13 +320,105 @@ def api_bulk_find_instagram():
             return jsonify({'error': 'CSV must include columns: business_id, restaurant_name, address'}), 400
 
         rows = list(reader)
-        finder = RestaurantInstagramFinder()
-        results = finder.find_instagram_handles_bulk(rows)
 
-        return jsonify({'results': results})
+        # Create a bulk job and process in background with progress
+        job_id = str(uuid.uuid4())
+        if not hasattr(app, 'bulk_jobs'):
+            app.bulk_jobs = {}
+        app.bulk_jobs[job_id] = {
+            'status': 'running',
+            'created_at': _time.time(),
+            'total': len(rows),
+            'completed': 0,
+            'results': []
+        }
+
+        def process_bulk_job(job_id_local: str, rows_local):
+            try:
+                finder = RestaurantInstagramFinder()
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                max_workers = max(1, settings.bulk_find_max_workers)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(finder._process_single_row, row): row for row in rows_local}
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                        except Exception as e:  # pragma: no cover
+                            row = futures[future]
+                            result = {
+                                'business_id': row.get('business_id', ''),
+                                'restaurant_name': row.get('restaurant_name', ''),
+                                'address': row.get('address', ''),
+                                'phone': row.get('phone', ''),
+                                'instagram_handle': '',
+                                'status': 'error',
+                                'message': str(e)
+                            }
+                        job = app.bulk_jobs.get(job_id_local)
+                        if not job:
+                            continue
+                        job['results'].append(result)
+                        job['completed'] += 1
+                # Done
+                job = app.bulk_jobs.get(job_id_local)
+                if job:
+                    job['status'] = 'done'
+            except Exception as e:  # pragma: no cover
+                job = app.bulk_jobs.get(job_id_local)
+                if job:
+                    job['status'] = f'error: {e}'
+
+        t = threading.Thread(target=process_bulk_job, args=(job_id, rows))
+        t.daemon = True
+        t.start()
+
+        return jsonify({'job_id': job_id})
     except Exception as e:
         logger.exception('bulk_find_instagram API failed')
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk_status', methods=['GET'])
+def api_bulk_status():
+    job_id = request.args.get('job_id', '').strip()
+    job = getattr(app, 'bulk_jobs', {}).get(job_id)
+    if not job:
+        return jsonify({'error': 'job not found'}), 404
+    total = max(1, job.get('total', 1))
+    completed = job.get('completed', 0)
+    percent = int((completed / total) * 100)
+    # Return a snapshot of latest results to keep payload light
+    results = job.get('results', [])
+    latest = results[-50:] if len(results) > 50 else results
+    return jsonify({
+        'status': job.get('status'),
+        'total': total,
+        'completed': completed,
+        'percent': percent,
+        'latest': latest
+    })
+
+@app.route('/api/bulk_download', methods=['GET'])
+def api_bulk_download():
+    job_id = request.args.get('job_id', '').strip()
+    job = getattr(app, 'bulk_jobs', {}).get(job_id)
+    if not job:
+        return jsonify({'error': 'job not found'}), 404
+    results = job.get('results', [])
+    headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message']
+    import csv as _csv
+    from io import StringIO
+    buf = StringIO()
+    writer = _csv.DictWriter(buf, fieldnames=headers)
+    writer.writeheader()
+    for r in results:
+        writer.writerow({h: (r.get(h, '') if r.get(h, '') is not None else '') for h in headers})
+    csv_data = buf.getvalue()
+    from flask import Response
+    return Response(
+        csv_data,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename=ig_handles_{job_id}.csv'}
+    )
 
 @socketio.on('start_processing')
 @socketio.on("start_processing")

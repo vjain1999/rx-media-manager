@@ -204,17 +204,48 @@ class RestaurantAnalyzer {
                     this.showModal('error', 'Bulk Error', data.error);
                     return;
                 }
-                this._bulkResults = data.results || [];
-                const el = document.getElementById('igBulkResult');
-                el.innerHTML = this.renderBulkTable(this._bulkResults);
-                const dlBtn = document.getElementById('igBulkDownloadBtn');
-                if (dlBtn) dlBtn.classList.remove('hidden');
+                this._bulkJobId = data.job_id;
+                this._bulkResults = [];
+                this._startBulkPolling();
             })
             .catch(err => {
                 console.error(err);
                 this.showModal('error', 'Error', 'Bulk processing failed.');
             })
             .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    }
+
+    _startBulkPolling() {
+        const el = document.getElementById('igBulkResult');
+        const dlBtn = document.getElementById('igBulkDownloadBtn');
+        const progress = document.createElement('div');
+        progress.id = 'bulkProgressBar';
+        progress.className = 'w-full bg-gray-200 rounded-full h-3 mb-3';
+        progress.innerHTML = '<div id="bulkProgressInner" class="bg-blue-600 h-3 rounded-full" style="width:0%"></div>';
+        el.innerHTML = '';
+        el.appendChild(progress);
+        const update = () => {
+            if (!this._bulkJobId) return;
+            fetch(`/api/bulk_status?job_id=${encodeURIComponent(this._bulkJobId)}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) return;
+                    const inner = document.getElementById('bulkProgressInner');
+                    if (inner) inner.style.width = `${data.percent}%`;
+                    const latest = data.latest || [];
+                    if (latest.length) {
+                        this._bulkResults = this._bulkResults.concat(latest);
+                        el.innerHTML = progress.outerHTML + this.renderBulkTable(this._bulkResults);
+                    }
+                    if (data.status === 'done') {
+                        if (dlBtn) dlBtn.classList.remove('hidden');
+                        this._bulkPoller && clearInterval(this._bulkPoller);
+                    }
+                })
+                .catch(() => {});
+        };
+        update();
+        this._bulkPoller = setInterval(update, 1500);
     }
 
     renderBulkTable(rows) {
