@@ -243,6 +243,43 @@ class RestaurantAnalyzer {
                     }
                     if (data.status === 'done') {
                         if (dlBtn) dlBtn.classList.remove('hidden');
+                        // Render summary counts
+                        try {
+                            const allRows = this._bulkResults || [];
+                            const totals = {
+                                total: allRows.length,
+                                ok: allRows.filter(r => r.status === 'ok').length,
+                                probable: allRows.filter(r => r.status === 'probable').length,
+                                not_found: allRows.filter(r => r.status === 'not_found').length,
+                                error: allRows.filter(r => r.status === 'error').length,
+                            };
+                            const summaryEl = document.getElementById('igBulkSummary');
+                            if (summaryEl) {
+                                summaryEl.innerHTML = `
+                                    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                      <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                                        <div class="text-xs text-green-800">Success</div>
+                                        <div class="text-lg font-semibold text-green-700">${totals.ok}</div>
+                                      </div>
+                                      <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-center">
+                                        <div class="text-xs text-yellow-800">Probable</div>
+                                        <div class="text-lg font-semibold text-yellow-700">${totals.probable}</div>
+                                      </div>
+                                      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+                                        <div class="text-xs text-gray-700">Not found</div>
+                                        <div class="text-lg font-semibold text-gray-800">${totals.not_found}</div>
+                                      </div>
+                                      <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+                                        <div class="text-xs text-red-800">Errors</div>
+                                        <div class="text-lg font-semibold text-red-700">${totals.error}</div>
+                                      </div>
+                                      <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center col-span-2 md:col-span-1">
+                                        <div class="text-xs text-blue-800">Total</div>
+                                        <div class="text-lg font-semibold text-blue-700">${totals.total}</div>
+                                      </div>
+                                    </div>`;
+                            }
+                        } catch (_) {}
                         this._bulkPoller && clearInterval(this._bulkPoller);
                     }
                 })
