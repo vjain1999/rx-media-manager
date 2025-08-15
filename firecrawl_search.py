@@ -121,6 +121,13 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
     except Exception as e:
         print(f"   ❌ Firecrawl search failed: {e}")
         return None
+    finally:
+        # Ensure Firecrawl client closes its async resources before loop closes
+        try:
+            if 'app' in locals() and hasattr(app, 'aclose'):
+                await app.aclose()  # type: ignore
+        except Exception:
+            pass
 
 def _extract_content_from_response(response) -> Optional[str]:
     """Extract relevant content from Firecrawl search response."""
@@ -210,6 +217,12 @@ Restaurant Instagram handle:"""
     except Exception as e:
         print(f"   ❌ OpenAI analysis failed: {e}")
         return None
+    finally:
+        # Ensure HTTPX async client is closed before event loop ends
+        try:
+            await client.close()
+        except Exception:
+            pass
 
 def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: str, phone: str) -> Optional[str]:
     """Synchronous wrapper for the async Firecrawl search function."""
