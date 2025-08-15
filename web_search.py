@@ -51,9 +51,18 @@ class RestaurantInstagramFinder:
                 if handle:
                     print(f"✅ {strategy_name} found handle: @{handle}")
                     
-                    # Verify the handle
+                    # Verify the handle (HTML heuristic)
                     print(f"🔍 Verifying handle @{handle}...")
-                    if self._verify_instagram_handle(handle, restaurant_name):
+                    html_ok = self._verify_instagram_handle(handle, restaurant_name)
+                    ai_ok = True
+                    ai_reason = ""
+                    # AI verification (soft, when enabled)
+                    if settings.use_ai_verification and settings.openai_api_key:
+                        ai_ok, ai_reason = self._ai_verify_handle(restaurant_name, address, handle)
+                        if not ai_ok:
+                            print(f"   ⚠️ AI low confidence for @{handle}: {ai_reason}")
+
+                    if html_ok or ai_ok:
                         print(f"✅ Handle @{handle} verified successfully")
                         return handle
                     else:
