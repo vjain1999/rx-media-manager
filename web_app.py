@@ -354,10 +354,28 @@ def api_bulk_find_instagram():
                                 'status': 'error',
                                 'message': str(e)
                             }
+                        # Deduplicate by business_id, choose the most likely/common handle
                         job = app.bulk_jobs.get(job_id_local)
                         if not job:
                             continue
-                        job['results'].append(result)
+                        existing = job['results']
+                        bid = (result.get('business_id') or '').strip()
+                        if bid:
+                            # gather all results so far for this business_id including new one
+                            candidates = [r for r in existing if (r.get('business_id') or '').strip() == bid]
+                            candidates.append(result)
+                            # score: prefer explicit ok over probable over not_found/error; then higher AI confidence if present
+                            def score(r):
+                                status = r.get('status', '')
+                                s = 2 if status == 'ok' else 1 if status == 'probable' else 0
+                                conf = r.get('ai_confidence', 0.0)
+                                return (s, conf)
+                            best = sorted(candidates, key=score, reverse=True)[0]
+                            # remove previous entries for this business_id
+                            job['results'] = [r for r in existing if (r.get('business_id') or '').strip() != bid]
+                            job['results'].append(best)
+                        else:
+                            job['results'].append(result)
                         job['completed'] += 1
                 # Done
                 job = app.bulk_jobs.get(job_id_local)

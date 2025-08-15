@@ -51,16 +51,16 @@ class RestaurantInstagramFinder:
                 if handle:
                     print(f"✅ {strategy_name} found handle: @{handle}")
                     
-                    # Verify the handle (HTML heuristic)
+                    # Verify the handle (AI + HTML heuristic)
                     print(f"🔍 Verifying handle @{handle}...")
                     html_ok = self._verify_instagram_handle(handle, restaurant_name)
                     ai_ok = True
+                    ai_conf = 1.0
                     ai_reason = ""
-                    # AI verification (soft, when enabled)
                     if settings.use_ai_verification and settings.openai_api_key:
-                        ai_ok, ai_reason = self._ai_verify_handle(restaurant_name, address, handle)
+                        ai_ok, ai_conf, ai_reason = self._ai_verify_handle(restaurant_name, address, handle)
                         if not ai_ok:
-                            print(f"   ⚠️ AI low confidence for @{handle}: {ai_reason}")
+                            print(f"   ⚠️ AI low confidence for @{handle} ({ai_conf:.2f}): {ai_reason}")
 
                     if html_ok or ai_ok:
                         print(f"✅ Handle @{handle} verified successfully")
@@ -121,11 +121,12 @@ class RestaurantInstagramFinder:
                     status = 'ok'
                     message = 'Using corporate/global account'
             # AI verification (soft validation)
+            ai_conf = 0.0
             if handle and settings.use_ai_verification and settings.openai_api_key:
-                verified, ai_reason = self._ai_verify_handle(name, address, handle)
+                verified, ai_conf, ai_reason = self._ai_verify_handle(name, address, handle)
                 if not verified:
                     status = 'probable'
-                    message = f'AI low confidence: {ai_reason}'
+                    message = f'AI low confidence ({ai_conf:.2f}): {ai_reason}'
             return {
                 'business_id': bid,
                 'restaurant_name': name,
@@ -133,7 +134,8 @@ class RestaurantInstagramFinder:
                 'phone': phone,
                 'instagram_handle': handle or '',
                 'status': status,
-                'message': message
+                'message': message,
+                'ai_confidence': ai_conf
             }
         except Exception as e:
             return {
@@ -146,8 +148,10 @@ class RestaurantInstagramFinder:
                 'message': str(e)
             }
 
-    def _ai_verify_handle(self, restaurant_name: str, address: str, handle: str) -> tuple[bool, str]:
-        """Use OpenAI to judge if handle plausibly matches the merchant."""
+    def _ai_verify_handle(self, restaurant_name: str, address: str, handle: str) -> tuple[bool, float, str]:
+        """Use OpenAI to judge if handle plausibly matches the merchant.
+        Returns (verified_bool, confidence_float, reason_str).
+        """
         try:
             client = openai.OpenAI(api_key=settings.openai_api_key)
             prompt = (
@@ -169,9 +173,9 @@ class RestaurantInstagramFinder:
             plausible = bool(data.get('plausible', False))
             conf = float(data.get('confidence', 0))
             reason = str(data.get('reason', ''))
-            return plausible and conf >= settings.ai_verification_min_confidence, reason
+            return plausible and conf >= settings.ai_verification_min_confidence, conf, reason
         except Exception as e:
-            return True, f"AI verify skipped: {e}"
+            return True, 1.0, f"AI verify skipped: {e}"
 
     def _discover_corporate_handle_via_firecrawl(self, restaurant_name: str) -> Optional[str]:
         """Use Firecrawl to search for a corporate/global IG handle when local is missing."""
