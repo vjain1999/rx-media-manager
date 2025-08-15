@@ -386,15 +386,25 @@ def api_bulk_status():
     total = max(1, job.get('total', 1))
     completed = job.get('completed', 0)
     percent = int((completed / total) * 100)
-    # Return a snapshot of latest results to keep payload light
+    # Support cursor-based pagination using 'from' index to avoid duplicates client-side
     results = job.get('results', [])
-    latest = results[-50:] if len(results) > 50 else results
+    from_index_raw = request.args.get('from', '').strip()
+    try:
+        from_index = int(from_index_raw) if from_index_raw != '' else None
+    except Exception:
+        from_index = None
+    if from_index is not None and 0 <= from_index <= len(results):
+        latest = results[from_index:]
+    else:
+        # default: last 50
+        latest = results[-50:] if len(results) > 50 else results
     return jsonify({
         'status': job.get('status'),
         'total': total,
         'completed': completed,
         'percent': percent,
-        'latest': latest
+        'latest': latest,
+        'next_index': len(results)
     })
 
 @app.route('/api/bulk_download', methods=['GET'])

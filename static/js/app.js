@@ -224,9 +224,11 @@ class RestaurantAnalyzer {
         progress.innerHTML = '<div id="bulkProgressInner" class="bg-blue-600 h-3 rounded-full" style="width:0%"></div>';
         el.innerHTML = '';
         el.appendChild(progress);
+        this._bulkSeen = 0; // cursor of rows consumed
         const update = () => {
             if (!this._bulkJobId) return;
-            fetch(`/api/bulk_status?job_id=${encodeURIComponent(this._bulkJobId)}`)
+            const fromParam = (typeof this._bulkSeen === 'number') ? `&from=${this._bulkSeen}` : '';
+            fetch(`/api/bulk_status?job_id=${encodeURIComponent(this._bulkJobId)}${fromParam}`)
                 .then(r => r.json())
                 .then(data => {
                     if (data.error) return;
@@ -234,7 +236,9 @@ class RestaurantAnalyzer {
                     if (inner) inner.style.width = `${data.percent}%`;
                     const latest = data.latest || [];
                     if (latest.length) {
-                        this._bulkResults = this._bulkResults.concat(latest);
+                        // append only new rows from server since 'from' cursor
+                        this._bulkResults = (this._bulkResults || []).concat(latest);
+                        this._bulkSeen = (typeof data.next_index === 'number') ? data.next_index : (this._bulkSeen + latest.length);
                         el.innerHTML = progress.outerHTML + this.renderBulkTable(this._bulkResults);
                     }
                     if (data.status === 'done') {
