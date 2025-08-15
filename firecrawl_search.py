@@ -13,23 +13,14 @@ except ImportError:
     FIRECRAWL_AVAILABLE = False
     print("⚠️ Firecrawl not available. Install with: pip install firecrawl-py")
 
-_fc_lock: Optional[asyncio.Lock] = None
-_last_fc_call: float = 0.0
-
-def _get_fc_lock() -> asyncio.Lock:
-    global _fc_lock
-    if _fc_lock is None:
-        _fc_lock = asyncio.Lock()
-    return _fc_lock
-
-async def _fc_rate_limited_sleep():
-    import time, random
-    global _last_fc_call
-    now = time.time()
-    elapsed = now - _last_fc_call
-    if elapsed < 1.0:
-        await asyncio.sleep(1.0 - elapsed + random.uniform(0.05, 0.25))
-    _last_fc_call = time.time()
+_last_fc_call_sync: float = 0.0
+_fc_thread_lock = None
+def _get_fc_thread_lock():
+    import threading
+    global _fc_thread_lock
+    if _fc_thread_lock is None:
+        _fc_thread_lock = threading.Lock()
+    return _fc_thread_lock
 
 async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: str, phone: str) -> Optional[str]:
     """
@@ -81,18 +72,15 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
             print(f"   🔍 Firecrawl query {i+1}: {query}")
             
             try:
-                # Global semaphore & rate limit ≤ 1 rps
-                async with _get_fc_lock():
-                    await _fc_rate_limited_sleep()
-                    # Search with Firecrawl using the search endpoint
-                    response = await app.search(
-                        query=query,
-                        limit=3,  # Fewer results per query to try more queries
-                        scrape_options=ScrapeOptions(
-                            formats=["markdown"],
-                            only_main_content=True
-                        )
+                # Search with Firecrawl using the search endpoint (rate limited in sync wrapper)
+                response = await app.search(
+                    query=query,
+                    limit=3,  # Fewer results per query to try more queries
+                    scrape_options=ScrapeOptions(
+                        formats=["markdown"],
+                        only_main_content=True
                     )
+                )
                 
                 if response and response.get('success') and response.get('data'):
                     results_count = len(response['data'])
@@ -226,17 +214,26 @@ Restaurant Instagram handle:"""
 def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: str, phone: str) -> Optional[str]:
     """Synchronous wrapper for the async Firecrawl search function."""
     try:
-        # Use a persistent event loop to avoid 'event loop is closed' warnings
+        # Simple global rate limit ≤ 1 rps using thread lock
+        import time, random
+        lock = _get_fc_thread_lock()
+        with lock:
+            global _last_fc_call_sync
+            now = time.time()
+            elapsed = now - _last_fc_call_sync
+            if elapsed < 1.0:
+                time.sleep(1.0 - elapsed + random.uniform(0.05, 0.25))
+            _last_fc_call_sync = time.time()
+
+        # Use a dedicated event loop per call (isolated from threadpools)
+        loop = asyncio.new_event_loop()
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        if loop.is_running():
-            # In case called from a running loop, create a new task and gather
-            return loop.run_until_complete(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))  # type: ignore
-        else:
             return loop.run_until_complete(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
     except Exception as e:
         print(f"   ❌ Firecrawl sync wrapper failed: {e}")
         return None
