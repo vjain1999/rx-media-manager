@@ -13,6 +13,15 @@ except ImportError:
     FIRECRAWL_AVAILABLE = False
     print("⚠️ Firecrawl not available. Install with: pip install firecrawl-py")
 
+_last_fc_call_sync: float = 0.0
+_fc_thread_lock = None
+def _get_fc_thread_lock():
+    import threading
+    global _fc_thread_lock
+    if _fc_thread_lock is None:
+        _fc_thread_lock = threading.Lock()
+    return _fc_thread_lock
+
 async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: str, phone: str) -> Optional[str]:
     """
     Use Firecrawl search to find restaurant Instagram handle, then analyze with OpenAI.
@@ -63,7 +72,7 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
             print(f"   🔍 Firecrawl query {i+1}: {query}")
             
             try:
-                # Search with Firecrawl using the search endpoint
+                # Search with Firecrawl using the search endpoint (rate limited in sync wrapper)
                 response = await app.search(
                     query=query,
                     limit=3,  # Fewer results per query to try more queries
@@ -85,7 +94,13 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
                     print(f"   ❌ Query {i+1} returned no results")
                     
             except Exception as query_error:
-                print(f"   ❌ Query {i+1} failed: {query_error}")
+                msg = str(query_error)
+                if '429' in msg or 'rate limit' in msg.lower():
+                    # Backoff on rate limit
+                    print("   ⚠️ Firecrawl rate-limited. Backing off 12s...")
+                    await asyncio.sleep(12)
+                else:
+                    print(f"   ❌ Query {i+1} failed: {query_error}")
                 continue
         
         if not all_content:
@@ -106,6 +121,13 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
     except Exception as e:
         print(f"   ❌ Firecrawl search failed: {e}")
         return None
+    finally:
+        # Ensure Firecrawl client closes its async resources before loop closes
+        try:
+            if 'app' in locals() and hasattr(app, 'aclose'):
+                await app.aclose()  # type: ignore
+        except Exception:
+            pass
 
 def _extract_content_from_response(response) -> Optional[str]:
     """Extract relevant content from Firecrawl search response."""
@@ -195,11 +217,36 @@ Restaurant Instagram handle:"""
     except Exception as e:
         print(f"   ❌ OpenAI analysis failed: {e}")
         return None
+    finally:
+        # Ensure HTTPX async client is closed before event loop ends
+        try:
+            await client.close()
+        except Exception:
+            pass
 
 def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: str, phone: str) -> Optional[str]:
     """Synchronous wrapper for the async Firecrawl search function."""
     try:
-        return asyncio.run(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))
+        # Simple global rate limit ≤ 1 rps using thread lock
+        import time, random
+        lock = _get_fc_thread_lock()
+        with lock:
+            global _last_fc_call_sync
+            now = time.time()
+            elapsed = now - _last_fc_call_sync
+            if elapsed < 1.0:
+                time.sleep(1.0 - elapsed + random.uniform(0.05, 0.25))
+            _last_fc_call_sync = time.time()
+
+        # Use a dedicated event loop per call (isolated from threadpools)
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
     except Exception as e:
         print(f"   ❌ Firecrawl sync wrapper failed: {e}")
         return None

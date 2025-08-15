@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     # Logging and debug
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"
+
+    # Bulk processing & verification
+    bulk_find_max_workers: int = int(os.getenv("BULK_FIND_MAX_WORKERS", "12"))
+    use_ai_verification: bool = os.getenv("USE_AI_VERIFICATION", "true").lower() == "true"
+    ai_verification_model: str = os.getenv("AI_VERIFICATION_MODEL", "gpt-4o-mini")
+    ai_verification_min_confidence: float = float(os.getenv("AI_VERIFICATION_MIN_CONFIDENCE", "0.65"))
     
     # Note: Pydantic v2 uses model_config; do not define inner Config
 

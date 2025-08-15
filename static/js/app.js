@@ -3,6 +3,7 @@ class RestaurantAnalyzer {
     constructor() {
         this.socket = io();
         this.currentResults = null;
+        this.initTabs();
         this.initEventListeners();
         this.initSocketListeners();
     }
@@ -23,6 +24,34 @@ class RestaurantAnalyzer {
         document.getElementById('closeModal').addEventListener('click', () => {
             this.hideModal();
         });
+
+        // IG handle form
+        const igForm = document.getElementById('igForm');
+        if (igForm) {
+            igForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.findIGHandle();
+            });
+        }
+
+        // Frames form
+        const framesForm = document.getElementById('framesForm');
+        if (framesForm) {
+            framesForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.analyzeFrames();
+            });
+        }
+
+        // Bulk IG upload
+        const bulkBtn = document.getElementById('igBulkUploadBtn');
+        if (bulkBtn) {
+            bulkBtn.addEventListener('click', () => this.processBulkIG());
+        }
+        const downloadBtn = document.getElementById('igBulkDownloadBtn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', () => this.downloadBulkCSV());
+        }
     }
 
     initSocketListeners() {
@@ -37,6 +66,32 @@ class RestaurantAnalyzer {
         this.socket.on('processing_complete', (results) => {
             this.showResults(results);
         });
+    }
+
+    initTabs() {
+        const tabs = {
+            tabBtnFull: 'tab-full',
+            tabBtnIG: 'tab-ig',
+            tabBtnFrames: 'tab-frames'
+        };
+        const setActive = (btnId) => {
+            Object.entries(tabs).forEach(([buttonId, tabId]) => {
+                const btn = document.getElementById(buttonId);
+                const tab = document.getElementById(tabId);
+                if (!btn || !tab) return;
+                const active = buttonId === btnId;
+                tab.style.display = active ? 'grid' : 'none';
+                btn.classList.toggle('bg-blue-600', active);
+                btn.classList.toggle('text-white', active);
+                btn.classList.toggle('text-gray-700', !active);
+            });
+        };
+        ['tabBtnFull','tabBtnIG','tabBtnFrames'].forEach((id) => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('click', () => setActive(id));
+        });
+        // Default
+        setActive('tabBtnFull');
     }
 
     startAnalysis() {
@@ -65,6 +120,201 @@ class RestaurantAnalyzer {
 
         // Start processing via WebSocket
         this.socket.emit("start_processing", formData);    }
+
+    findIGHandle() {
+        const name = document.getElementById('igRestaurantName').value.trim();
+        const address = document.getElementById('igAddress').value.trim();
+        const phone = (document.getElementById('igPhone').value || '').trim();
+        if (!name || !address) {
+            this.showModal('error', 'Missing info', 'Please enter restaurant name and address.');
+            return;
+        }
+        const btn = document.getElementById('igFindBtn');
+        const original = btn.innerHTML;
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Searching...';
+        fetch('/api/find_instagram', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ restaurant_name: name, address, phone })
+        })
+        .then(r => r.json())
+        .then(data => {
+            const el = document.getElementById('igResult');
+            if (data.error) {
+                el.innerHTML = `<div class="text-red-600">${data.error}</div>`;
+            } else {
+                const handle = data.instagram_handle;
+                const url = handle ? `https://www.instagram.com/${handle}/` : '';
+                el.innerHTML = handle ? `Found: <a href="${url}" target="_blank" class="text-blue-600 hover:underline">@${handle}</a>` : 'No handle found';
+            }
+        })
+        .catch(err => {
+            console.error(err);
+            this.showModal('error', 'Error', 'Failed to search.');
+        })
+        .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    }
+
+    analyzeFrames() {
+        const fileInput = document.getElementById('videoFile');
+        const caption = (document.getElementById('videoCaption').value || '').trim();
+        if (!fileInput.files || fileInput.files.length === 0) {
+            this.showModal('error', 'Missing file', 'Please choose a video file.');
+            return;
+        }
+        const btn = document.getElementById('framesAnalyzeBtn');
+        const original = btn.innerHTML;
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Analyzing...';
+        const form = new FormData();
+        form.append('video', fileInput.files[0]);
+        form.append('caption', caption);
+        fetch('/api/analyze_frames', { method: 'POST', body: form })
+            .then(r => r.json())
+            .then(data => {
+                const el = document.getElementById('framesResult');
+                if (data.error) {
+                    el.innerHTML = `<div class="text-red-600">${data.error}</div>`;
+                } else {
+                    el.innerHTML = `<pre class="text-sm bg-gray-50 p-3 rounded-lg overflow-x-auto">${JSON.stringify(data, null, 2)}</pre>`;
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                this.showModal('error', 'Error', 'Frame analysis failed.');
+            })
+            .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    }
+
+    processBulkIG() {
+        const fileInput = document.getElementById('igBulkFile');
+        const file = fileInput && fileInput.files && fileInput.files[0];
+        if (!file) {
+            this.showModal('error', 'Missing file', 'Please choose a CSV file.');
+            return;
+        }
+        const btn = document.getElementById('igBulkUploadBtn');
+        const original = btn.innerHTML;
+        btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>Processing...';
+        const form = new FormData();
+        form.append('file', file);
+        fetch('/api/bulk_find_instagram', { method: 'POST', body: form })
+            .then(r => r.json())
+            .then(data => {
+                if (data.error) {
+                    this.showModal('error', 'Bulk Error', data.error);
+                    return;
+                }
+                this._bulkJobId = data.job_id;
+                this._bulkResults = [];
+                this._startBulkPolling();
+            })
+            .catch(err => {
+                console.error(err);
+                this.showModal('error', 'Error', 'Bulk processing failed.');
+            })
+            .finally(() => { btn.disabled = false; btn.innerHTML = original; });
+    }
+
+    _startBulkPolling() {
+        const el = document.getElementById('igBulkResult');
+        const dlBtn = document.getElementById('igBulkDownloadBtn');
+        const progress = document.createElement('div');
+        progress.id = 'bulkProgressBar';
+        progress.className = 'w-full bg-gray-200 rounded-full h-3 mb-3';
+        progress.innerHTML = '<div id="bulkProgressInner" class="bg-blue-600 h-3 rounded-full" style="width:0%"></div>';
+        el.innerHTML = '';
+        el.appendChild(progress);
+        this._bulkSeen = 0; // cursor of rows consumed
+        const update = () => {
+            if (!this._bulkJobId) return;
+            const fromParam = (typeof this._bulkSeen === 'number') ? `&from=${this._bulkSeen}` : '';
+            fetch(`/api/bulk_status?job_id=${encodeURIComponent(this._bulkJobId)}${fromParam}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error) return;
+                    const inner = document.getElementById('bulkProgressInner');
+                    if (inner) inner.style.width = `${data.percent}%`;
+                    const latest = data.latest || [];
+                    if (latest.length) {
+                        // append only new rows from server since 'from' cursor
+                        this._bulkResults = (this._bulkResults || []).concat(latest);
+                        this._bulkSeen = (typeof data.next_index === 'number') ? data.next_index : (this._bulkSeen + latest.length);
+                        el.innerHTML = progress.outerHTML + this.renderBulkTable(this._bulkResults);
+                    }
+                    if (data.status === 'done') {
+                        if (dlBtn) dlBtn.classList.remove('hidden');
+                        // Render summary counts
+                        try {
+                            const allRows = this._bulkResults || [];
+                            const totals = {
+                                total: allRows.length,
+                                ok: allRows.filter(r => r.status === 'ok').length,
+                                probable: allRows.filter(r => r.status === 'probable').length,
+                                not_found: allRows.filter(r => r.status === 'not_found').length,
+                                error: allRows.filter(r => r.status === 'error').length,
+                            };
+                            const summaryEl = document.getElementById('igBulkSummary');
+                            if (summaryEl) {
+                                summaryEl.innerHTML = `
+                                    <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+                                      <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
+                                        <div class="text-xs text-green-800">Success</div>
+                                        <div class="text-lg font-semibold text-green-700">${totals.ok}</div>
+                                      </div>
+                                      <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-center">
+                                        <div class="text-xs text-yellow-800">Probable</div>
+                                        <div class="text-lg font-semibold text-yellow-700">${totals.probable}</div>
+                                      </div>
+                                      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3 text-center">
+                                        <div class="text-xs text-gray-700">Not found</div>
+                                        <div class="text-lg font-semibold text-gray-800">${totals.not_found}</div>
+                                      </div>
+                                      <div class="bg-red-50 border border-red-200 rounded-lg p-3 text-center">
+                                        <div class="text-xs text-red-800">Errors</div>
+                                        <div class="text-lg font-semibold text-red-700">${totals.error}</div>
+                                      </div>
+                                      <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center col-span-2 md:col-span-1">
+                                        <div class="text-xs text-blue-800">Total</div>
+                                        <div class="text-lg font-semibold text-blue-700">${totals.total}</div>
+                                      </div>
+                                    </div>`;
+                            }
+                        } catch (_) {}
+                        this._bulkPoller && clearInterval(this._bulkPoller);
+                    }
+                })
+                .catch(() => {});
+        };
+        update();
+        this._bulkPoller = setInterval(update, 1500);
+    }
+
+    renderBulkTable(rows) {
+        if (!rows || rows.length === 0) return '<div class="text-gray-500">No results.</div>';
+        const headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message'];
+        const thead = '<thead><tr>' + headers.map(h => `<th class="px-3 py-2 text-left border-b">${h}</th>`).join('') + '</tr></thead>';
+        const tbody = '<tbody>' + rows.map(r => '<tr>' + headers.map(h => `<td class="px-3 py-2 border-b">${(r[h] ?? '').toString()}</td>`).join('') + '</tr>').join('') + '</tbody>';
+        return `<table class="min-w-full">${thead}${tbody}</table>`;
+    }
+
+    downloadBulkCSV() {
+        const rows = this._bulkResults || [];
+        if (!rows.length) return;
+        const headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message'];
+        const csv = [headers.join(',')].concat(rows.map(r => headers.map(h => {
+            const v = (r[h] ?? '').toString().replace(/"/g, '""');
+            return '"' + v + '"';
+        }).join(','))).join('\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'ig_handles.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
 
     updateProgress(data) {
         const { step, status, message, progress_percent, data: stepData } = data;

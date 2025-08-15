@@ -14,6 +14,13 @@ import time
 import json
 import os
 from main import RestaurantVideoProcessor, find_restaurant_instagram, fetch_instagram_videos, analyze_restaurant_videos, notify_restaurant
+from video_analyzer import VideoQualityAnalyzer
+from config import settings
+import csv
+import io
+from web_search import RestaurantInstagramFinder
+import uuid
+import time as _time
 from sms_notifier import RestaurantNotifier
 
 # Configure detailed logging
@@ -248,6 +255,198 @@ def index():
     """Serve the main web interface"""
     logger.info("🌐 Serving main web interface")
     return render_template('index.html')
+
+@app.route('/api/find_instagram', methods=['POST'])
+def api_find_instagram():
+    try:
+        data = request.get_json()
+        restaurant_name = (data.get('restaurant_name') or '').strip()
+        address = (data.get('address') or '').strip()
+        phone = (data.get('phone') or '').strip()
+        if not restaurant_name or not address:
+            return jsonify({'error': 'Missing restaurant_name or address'}), 400
+        handle = find_restaurant_instagram(restaurant_name, address, phone)
+        if not handle:
+            return jsonify({'instagram_handle': None, 'message': 'No handle found'}), 200
+        return jsonify({'instagram_handle': handle})
+    except Exception as e:
+        logger.exception('find_instagram API failed')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/analyze_frames', methods=['POST'])
+def api_analyze_frames():
+    try:
+        if 'video' not in request.files:
+            return jsonify({'error': 'No video file uploaded'}), 400
+        file = request.files['video']
+        caption = request.form.get('caption', '')
+        if file.filename == '':
+            return jsonify({'error': 'Empty filename'}), 400
+
+        # Save to temp path in configured videos dir
+        save_dir = settings.videos_dir
+        save_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = os.path.join(str(save_dir), file.filename)
+        file.save(temp_path)
+
+        analyzer = VideoQualityAnalyzer()
+        analysis = analyzer.analyze_video_quality({'local_path': temp_path, 'caption': caption})
+
+        # Optionally remove uploaded file after analysis
+        try:
+            os.remove(temp_path)
+        except Exception:
+            pass
+
+        return jsonify(analysis)
+    except Exception as e:
+        logger.exception('analyze_frames API failed')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk_find_instagram', methods=['POST'])
+def api_bulk_find_instagram():
+    try:
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+        file = request.files['file']
+        if not file.filename.lower().endswith('.csv'):
+            return jsonify({'error': 'Please upload a .csv file'}), 400
+
+        # Read CSV
+        stream = io.StringIO(file.stream.read().decode('utf-8', errors='ignore'))
+        reader = csv.DictReader(stream)
+        required_cols = {'business_id', 'restaurant_name', 'address'}
+        if not required_cols.issubset({c.strip() for c in reader.fieldnames or []}):
+            return jsonify({'error': 'CSV must include columns: business_id, restaurant_name, address'}), 400
+
+        rows = list(reader)
+
+        # Create a bulk job and process in background with progress
+        job_id = str(uuid.uuid4())
+        if not hasattr(app, 'bulk_jobs'):
+            app.bulk_jobs = {}
+        app.bulk_jobs[job_id] = {
+            'status': 'running',
+            'created_at': _time.time(),
+            'total': len(rows),
+            'completed': 0,
+            'results': []
+        }
+
+        def process_bulk_job(job_id_local: str, rows_local):
+            try:
+                finder = RestaurantInstagramFinder()
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                max_workers = max(1, settings.bulk_find_max_workers)
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(finder._process_single_row, row): row for row in rows_local}
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                        except Exception as e:  # pragma: no cover
+                            row = futures[future]
+                            result = {
+                                'business_id': row.get('business_id', ''),
+                                'restaurant_name': row.get('restaurant_name', ''),
+                                'address': row.get('address', ''),
+                                'phone': row.get('phone', ''),
+                                'instagram_handle': '',
+                                'status': 'error',
+                                'message': str(e)
+                            }
+                        # Deduplicate by business_id, choose the most likely/common handle
+                        job = app.bulk_jobs.get(job_id_local)
+                        if not job:
+                            continue
+                        existing = job['results']
+                        bid = (result.get('business_id') or '').strip()
+                        if bid:
+                            # gather all results so far for this business_id including new one
+                            candidates = [r for r in existing if (r.get('business_id') or '').strip() == bid]
+                            candidates.append(result)
+                            # score: prefer explicit ok over probable over not_found/error; then higher AI confidence if present
+                            def score(r):
+                                status = r.get('status', '')
+                                s = 2 if status == 'ok' else 1 if status == 'probable' else 0
+                                conf = r.get('ai_confidence', 0.0)
+                                return (s, conf)
+                            best = sorted(candidates, key=score, reverse=True)[0]
+                            # remove previous entries for this business_id
+                            job['results'] = [r for r in existing if (r.get('business_id') or '').strip() != bid]
+                            job['results'].append(best)
+                        else:
+                            job['results'].append(result)
+                        job['completed'] += 1
+                # Done
+                job = app.bulk_jobs.get(job_id_local)
+                if job:
+                    job['status'] = 'done'
+            except Exception as e:  # pragma: no cover
+                job = app.bulk_jobs.get(job_id_local)
+                if job:
+                    job['status'] = f'error: {e}'
+
+        t = threading.Thread(target=process_bulk_job, args=(job_id, rows))
+        t.daemon = True
+        t.start()
+
+        return jsonify({'job_id': job_id})
+    except Exception as e:
+        logger.exception('bulk_find_instagram API failed')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk_status', methods=['GET'])
+def api_bulk_status():
+    job_id = request.args.get('job_id', '').strip()
+    job = getattr(app, 'bulk_jobs', {}).get(job_id)
+    if not job:
+        return jsonify({'error': 'job not found'}), 404
+    total = max(1, job.get('total', 1))
+    completed = job.get('completed', 0)
+    percent = int((completed / total) * 100)
+    # Support cursor-based pagination using 'from' index to avoid duplicates client-side
+    results = job.get('results', [])
+    from_index_raw = request.args.get('from', '').strip()
+    try:
+        from_index = int(from_index_raw) if from_index_raw != '' else None
+    except Exception:
+        from_index = None
+    if from_index is not None and 0 <= from_index <= len(results):
+        latest = results[from_index:]
+    else:
+        # default: last 50
+        latest = results[-50:] if len(results) > 50 else results
+    return jsonify({
+        'status': job.get('status'),
+        'total': total,
+        'completed': completed,
+        'percent': percent,
+        'latest': latest,
+        'next_index': len(results)
+    })
+
+@app.route('/api/bulk_download', methods=['GET'])
+def api_bulk_download():
+    job_id = request.args.get('job_id', '').strip()
+    job = getattr(app, 'bulk_jobs', {}).get(job_id)
+    if not job:
+        return jsonify({'error': 'job not found'}), 404
+    results = job.get('results', [])
+    headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message']
+    import csv as _csv
+    from io import StringIO
+    buf = StringIO()
+    writer = _csv.DictWriter(buf, fieldnames=headers)
+    writer.writeheader()
+    for r in results:
+        writer.writerow({h: (r.get(h, '') if r.get(h, '') is not None else '') for h in headers})
+    csv_data = buf.getvalue()
+    from flask import Response
+    return Response(
+        csv_data,
+        mimetype='text/csv',
+        headers={'Content-Disposition': f'attachment; filename=ig_handles_{job_id}.csv'}
+    )
 
 @socketio.on('start_processing')
 @socketio.on("start_processing")
