@@ -1,10 +1,11 @@
 FROM python:3.10-slim
 
-# Install system dependencies for OpenCV
+# Install system dependencies (headless OpenCV, yt-dlp, moviepy)
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
+    ffmpeg \
+    libgl1 \
     libglib2.0-0 \
-    libgtk-3-0 \
     libgstreamer1.0-0 \
     libgstreamer-plugins-base1.0-0 \
     libxext6 \
