@@ -18,6 +18,7 @@ from video_analyzer import VideoQualityAnalyzer
 from config import settings
 import csv
 import io
+from web_search import RestaurantInstagramFinder
 from sms_notifier import RestaurantNotifier
 
 # Configure detailed logging
@@ -316,45 +317,9 @@ def api_bulk_find_instagram():
         if not required_cols.issubset({c.strip() for c in reader.fieldnames or []}):
             return jsonify({'error': 'CSV must include columns: business_id, restaurant_name, address'}), 400
 
-        results = []
-        for row in reader:
-            business_id = (row.get('business_id') or '').strip()
-            name = (row.get('restaurant_name') or '').strip()
-            address = (row.get('address') or '').strip()
-            phone = (row.get('phone') or '').strip()
-            if not business_id or not name or not address:
-                results.append({
-                    'business_id': business_id,
-                    'restaurant_name': name,
-                    'address': address,
-                    'phone': phone,
-                    'instagram_handle': '',
-                    'status': 'error',
-                    'message': 'Missing required fields'
-                })
-                continue
-
-            try:
-                handle = find_restaurant_instagram(name, address, phone)
-                results.append({
-                    'business_id': business_id,
-                    'restaurant_name': name,
-                    'address': address,
-                    'phone': phone,
-                    'instagram_handle': handle or '',
-                    'status': 'ok' if handle else 'not_found',
-                    'message': '' if handle else 'No handle found'
-                })
-            except Exception as e:
-                results.append({
-                    'business_id': business_id,
-                    'restaurant_name': name,
-                    'address': address,
-                    'phone': phone,
-                    'instagram_handle': '',
-                    'status': 'error',
-                    'message': str(e)
-                })
+        rows = list(reader)
+        finder = RestaurantInstagramFinder()
+        results = finder.find_instagram_handles_bulk(rows)
 
         return jsonify({'results': results})
     except Exception as e:

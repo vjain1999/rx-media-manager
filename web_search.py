@@ -7,6 +7,8 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 import time
 from config import settings
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import openai
 
 class RestaurantInstagramFinder:
     """Find Instagram handles for restaurants using web search."""
@@ -67,6 +69,108 @@ class RestaurantInstagramFinder:
         
         print("❌ All search strategies exhausted, no valid handle found")
         return None
+
+    def find_instagram_handles_bulk(self, rows: List[dict]) -> List[dict]:
+        """Parallel bulk search for Instagram handles with AI verification and corporate retry."""
+        results: List[dict] = []
+        max_workers = max(1, settings.bulk_find_max_workers)
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_row = {
+                executor.submit(self._process_single_row, row): row for row in rows
+            }
+            for future in as_completed(future_to_row):
+                try:
+                    results.append(future.result())
+                except Exception as e:
+                    row = future_to_row[future]
+                    results.append({
+                        'business_id': row.get('business_id', ''),
+                        'restaurant_name': row.get('restaurant_name', ''),
+                        'address': row.get('address', ''),
+                        'phone': row.get('phone', ''),
+                        'instagram_handle': '',
+                        'status': 'error',
+                        'message': str(e)
+                    })
+        return results
+
+    def _process_single_row(self, row: dict) -> dict:
+        bid = (row.get('business_id') or '').strip()
+        name = (row.get('restaurant_name') or '').strip()
+        address = (row.get('address') or '').strip()
+        phone = (row.get('phone') or '').strip()
+        try:
+            handle = self.find_instagram_handle(name, address, phone)
+            status = 'ok' if handle else 'not_found'
+            message = '' if handle else 'No handle found'
+            # Retry: try finding corporate/global if no local found
+            corp_handle = ''
+            if not handle:
+                corp_handle = self._discover_corporate_handle_via_firecrawl(name)
+                if corp_handle:
+                    handle = corp_handle
+                    status = 'ok'
+                    message = 'Using corporate/global account'
+            # AI verification (soft validation)
+            if handle and settings.use_ai_verification and settings.openai_api_key:
+                verified, ai_reason = self._ai_verify_handle(name, address, handle)
+                if not verified:
+                    status = 'probable'
+                    message = f'AI low confidence: {ai_reason}'
+            return {
+                'business_id': bid,
+                'restaurant_name': name,
+                'address': address,
+                'phone': phone,
+                'instagram_handle': handle or '',
+                'status': status,
+                'message': message
+            }
+        except Exception as e:
+            return {
+                'business_id': bid,
+                'restaurant_name': name,
+                'address': address,
+                'phone': phone,
+                'instagram_handle': '',
+                'status': 'error',
+                'message': str(e)
+            }
+
+    def _ai_verify_handle(self, restaurant_name: str, address: str, handle: str) -> tuple[bool, str]:
+        """Use OpenAI to judge if handle plausibly matches the merchant."""
+        try:
+            client = openai.OpenAI(api_key=settings.openai_api_key)
+            prompt = (
+                f"Merchant: {restaurant_name}\nAddress: {address}\nCandidate IG: @{handle}\n\n"
+                "Does this Instagram handle plausibly represent this merchant (local or corporate)?"
+                " Consider what you know about the brand and typical naming. Return JSON: {\n"
+                "  \"plausible\": true|false,\n  \"confidence\": 0.0-1.0,\n  \"reason\": \"short\"\n}"
+            )
+            resp = client.chat.completions.create(
+                model=settings.ai_verification_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=200
+            )
+            txt = resp.choices[0].message.content or "{}"
+            import json as _json
+            s = txt.find('{'); e = txt.rfind('}') + 1
+            data = _json.loads(txt[s:e]) if s != -1 and e != -1 else {}
+            plausible = bool(data.get('plausible', False))
+            conf = float(data.get('confidence', 0))
+            reason = str(data.get('reason', ''))
+            return plausible and conf >= settings.ai_verification_min_confidence, reason
+        except Exception as e:
+            return True, f"AI verify skipped: {e}"
+
+    def _discover_corporate_handle_via_firecrawl(self, restaurant_name: str) -> Optional[str]:
+        """Use Firecrawl to search for a corporate/global IG handle when local is missing."""
+        try:
+            from firecrawl_search import firecrawl_search_restaurant_instagram_sync
+            return firecrawl_search_restaurant_instagram_sync(restaurant_name, '', '')
+        except Exception:
+            return None
     
     def _search_with_gpt4(self, restaurant_name: str, address: str, phone: str) -> Optional[str]:
         """Search using GPT-4 with web search capabilities."""
