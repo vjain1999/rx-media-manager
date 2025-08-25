@@ -218,11 +218,18 @@ class RestaurantAnalyzer {
     _startBulkPolling() {
         const el = document.getElementById('igBulkResult');
         const dlBtn = document.getElementById('igBulkDownloadBtn');
+        const progressLabel = document.createElement('div');
+        progressLabel.id = 'bulkProgressLabel';
+        progressLabel.className = 'text-sm text-gray-600 mb-2';
+        progressLabel.textContent = 'Processing restaurants...';
+        
         const progress = document.createElement('div');
         progress.id = 'bulkProgressBar';
-        progress.className = 'w-full bg-gray-200 rounded-full h-3 mb-3';
-        progress.innerHTML = '<div id="bulkProgressInner" class="bg-blue-600 h-3 rounded-full" style="width:0%"></div>';
+        progress.className = 'w-full bg-gray-200 rounded-full h-6 mb-3';
+        progress.innerHTML = '<div id="bulkProgressInner" class="bg-blue-600 h-6 rounded-full flex items-center justify-center" style="width:0%"></div>';
+        
         el.innerHTML = '';
+        el.appendChild(progressLabel);
         el.appendChild(progress);
         this._bulkSeen = 0; // cursor of rows consumed
         const update = () => {
@@ -232,14 +239,35 @@ class RestaurantAnalyzer {
                 .then(r => r.json())
                 .then(data => {
                     if (data.error) return;
+                    
+                    // Update progress bar
                     const inner = document.getElementById('bulkProgressInner');
-                    if (inner) inner.style.width = `${data.percent}%`;
+                    if (inner) {
+                        inner.style.width = `${data.percent}%`;
+                        // Add text showing progress
+                        inner.textContent = `${data.completed || 0}/${data.total || 0} (${data.percent}%)`;
+                        inner.style.fontSize = '12px';
+                        inner.style.color = 'white';
+                        inner.style.fontWeight = 'bold';
+                        inner.style.minWidth = '60px'; // Ensure text is visible even at low percentages
+                    }
+                    
+                    // Update progress label
+                    const label = document.getElementById('bulkProgressLabel');
+                    if (label) {
+                        if (data.status === 'done') {
+                            label.textContent = 'Processing completed!';
+                            label.className = 'text-sm text-green-600 mb-2 font-semibold';
+                        } else {
+                            label.textContent = `Processing restaurants... ${data.completed || 0}/${data.total || 0}`;
+                        }
+                    }
                     const latest = data.latest || [];
                     if (latest.length) {
                         // append only new rows from server since 'from' cursor
                         this._bulkResults = (this._bulkResults || []).concat(latest);
                         this._bulkSeen = (typeof data.next_index === 'number') ? data.next_index : (this._bulkSeen + latest.length);
-                        el.innerHTML = progress.outerHTML + this.renderBulkTable(this._bulkResults);
+                        el.innerHTML = progressLabel.outerHTML + progress.outerHTML + this.renderBulkTable(this._bulkResults);
                     }
                     if (data.status === 'done') {
                         if (dlBtn) dlBtn.classList.remove('hidden');
@@ -298,22 +326,20 @@ class RestaurantAnalyzer {
     }
 
     downloadBulkCSV() {
-        const rows = this._bulkResults || [];
-        if (!rows.length) return;
-        const headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message'];
-        const csv = [headers.join(',')].concat(rows.map(r => headers.map(h => {
-            const v = (r[h] ?? '').toString().replace(/"/g, '""');
-            return '"' + v + '"';
-        }).join(','))).join('\n');
-        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
+        if (!this._bulkJobId) {
+            this.showModal('error', 'Error', 'No bulk job to download.');
+            return;
+        }
+        
+        // Use server endpoint for downloading CSV
+        const downloadUrl = `/api/bulk_download?job_id=${encodeURIComponent(this._bulkJobId)}`;
         const a = document.createElement('a');
-        a.href = url;
-        a.download = 'ig_handles.csv';
+        a.href = downloadUrl;
+        a.download = `ig_handles_${this._bulkJobId}.csv`;
+        a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(url);
     }
 
     updateProgress(data) {
