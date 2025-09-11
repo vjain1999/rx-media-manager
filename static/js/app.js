@@ -265,10 +265,15 @@ class RestaurantAnalyzer {
                         }
                     }
                     const latest = data.latest || [];
-                    if (latest.length) {
+                    if (Array.isArray(latest) && latest.length) {
                         // append only new rows from server since 'from' cursor
                         this._bulkResults = (this._bulkResults || []).concat(latest);
-                        this._bulkSeen = (typeof data.next_index === 'number') ? data.next_index : (this._bulkSeen + latest.length);
+                        // advance cursor by server-provided next_index (monotonic), fallback to length
+                        if (typeof data.next_index === 'number' && data.next_index >= (this._bulkSeen || 0)) {
+                            this._bulkSeen = data.next_index;
+                        } else {
+                            this._bulkSeen = (this._bulkSeen || 0) + latest.length;
+                        }
                         el.innerHTML = progressLabel.outerHTML + progress.outerHTML + this.renderBulkTable(this._bulkResults);
                     }
                     if (data.status === 'done') {
@@ -311,6 +316,12 @@ class RestaurantAnalyzer {
                             }
                         } catch (_) {}
                         this._bulkPoller && clearInterval(this._bulkPoller);
+                        // Force final percent to 100% on completion
+                        const inner = document.getElementById('bulkProgressInner');
+                        if (inner) {
+                            inner.style.width = '100%';
+                            inner.textContent = `${data.total || allRows.length}/${data.total || allRows.length} (100%)`;
+                        }
                     }
                 })
                 .catch(() => {});

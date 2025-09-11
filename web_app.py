@@ -513,8 +513,8 @@ def api_bulk_status():
     if from_index is not None and 0 <= from_index <= len(results):
         latest = results[from_index:]
     else:
-        # default: last 50
-        latest = results[-50:] if len(results) > 50 else results
+        # If cursor exceeds current results length (due to dedup), return empty to avoid duplicates
+        latest = []
     return jsonify({
         'status': job.get('status'),
         'total': total,
@@ -523,7 +523,7 @@ def api_bulk_status():
         'avg_processing_sec': job.get('avg_processing_sec', None),
         'eta_sec': job.get('eta_sec', None),
         'latest': latest,
-        'next_index': len(results)
+        'next_index': job.get('completed', len(results))
     })
 
 @app.route('/api/bulk_download', methods=['GET'])
