@@ -316,26 +316,49 @@ def api_bulk_find_instagram():
         # Read CSV
         stream = io.StringIO(file.stream.read().decode('utf-8', errors='ignore'))
         reader = csv.DictReader(stream)
-        available_cols = {c.strip() for c in reader.fieldnames or []}
-        
-        # Check for required columns - need at least one ID field
-        has_business_id = 'business_id' in available_cols
-        has_store_id = 'store_id' in available_cols
-        has_required_fields = ('restaurant_name' in available_cols and 
-                              'address' in available_cols and
-                              (has_business_id or has_store_id))
-        
-        if not has_required_fields:
-            missing_fields = []
-            if not has_business_id and not has_store_id:
-                missing_fields.append('business_id or store_id')
-            if 'restaurant_name' not in available_cols:
-                missing_fields.append('restaurant_name')
-            if 'address' not in available_cols:
-                missing_fields.append('address')
-            return jsonify({'error': f'CSV must include columns: {", ".join(missing_fields)}'}), 400
+        # Normalize headers to expected canonical keys
+        raw_headers = [h.strip() for h in (reader.fieldnames or [])]
+        def canon(h: str) -> str:
+            s = (h or '').strip().lower()
+            s = s.replace('_', ' ').replace('-', ' ')
+            while '  ' in s:
+                s = s.replace('  ', ' ')
+            if s in ('business id', 'business_id', 'businessid', 'business-id'):
+                return 'business_id'
+            if s in ('store id', 'store_id', 'storeid', 'store-id'):
+                return 'store_id'
+            if s in ('restaurant name', 'restaurant_name', 'restaurantname', 'restaurant-name'):
+                return 'restaurant_name'
+            if s == 'address':
+                return 'address'
+            return ''
 
-        rows = list(reader)
+        header_map = {h: canon(h) for h in raw_headers if canon(h)}
+        available_canonical = set(header_map.values())
+
+        # Enforce required headers as specified: BUSINESS_ID, STORE_ID, RESTAURANT NAME, ADDRESS
+        required = {'business_id', 'store_id', 'restaurant_name', 'address'}
+        if not required.issubset(available_canonical):
+            missing = required - available_canonical
+            # Return names in the user's desired display format
+            display_map = {
+                'business_id': 'BUSINESS_ID',
+                'store_id': 'STORE_ID',
+                'restaurant_name': 'RESTAURANT NAME',
+                'address': 'ADDRESS'
+            }
+            return jsonify({'error': f"CSV must include columns: {', '.join(display_map[k] for k in missing)}"}), 400
+
+        # Build normalized rows with canonical keys
+        rows = []
+        for src in reader:
+            norm = {
+                'business_id': (src.get(next((h for h, c in header_map.items() if c == 'business_id'), ''), '') or '').strip(),
+                'store_id': (src.get(next((h for h, c in header_map.items() if c == 'store_id'), ''), '') or '').strip(),
+                'restaurant_name': (src.get(next((h for h, c in header_map.items() if c == 'restaurant_name'), ''), '') or '').strip(),
+                'address': (src.get(next((h for h, c in header_map.items() if c == 'address'), ''), '') or '').strip(),
+            }
+            rows.append(norm)
 
         # Create a bulk job and process in background with progress
         job_id = str(uuid.uuid4())
