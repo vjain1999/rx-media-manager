@@ -19,6 +19,7 @@ from config import settings
 import csv
 import io
 from web_search import RestaurantInstagramFinder
+from run_full_system_extract import process_single_restaurant_extract as _extract_single, add_review_flags as _add_review_flags
 import uuid
 import time as _time
 from sms_notifier import RestaurantNotifier
@@ -350,11 +351,43 @@ def api_bulk_find_instagram():
 
         def process_bulk_job(job_id_local: str, rows_local):
             try:
-                finder = RestaurantInstagramFinder()
+                # Parameters aligned with run_full_system_extract defaults
                 from concurrent.futures import ThreadPoolExecutor, as_completed
-                max_workers = max(1, settings.bulk_find_max_workers)
+                max_workers = max(1, getattr(settings, 'bulk_find_max_workers', 6))
+                starts_per_sec = float(getattr(settings, 'bulk_starts_per_sec', 1.5))
+                enable_google = False
+                enable_ddg = False
+
+                # Optional shuffling to spread bursts
+                try:
+                    import random as _random
+                    rows_local = list(rows_local)
+                    _random.shuffle(rows_local)
+                except Exception:
+                    pass
+
+                # Submit with start-rate throttling
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {executor.submit(finder._process_single_row, row): row for row in rows_local}
+                    futures = {}
+                    last_start_ts = 0.0
+                    min_interval = (1.0 / starts_per_sec) if starts_per_sec and starts_per_sec > 0 else 0.0
+                    total = len(rows_local)
+                    for idx, row in enumerate(rows_local, start=1):
+                        if min_interval > 0:
+                            now = _time.time()
+                            elapsed = now - last_start_ts
+                            if elapsed < min_interval:
+                                _time.sleep(min_interval - elapsed)
+                            last_start_ts = _time.time()
+                        # Normalize row structure expected by extractor
+                        normalized = {
+                            'business_id': (row.get('business_id') or '').strip(),
+                            'store_id': (row.get('store_id') or '').strip(),
+                            'restaurant_name': (row.get('restaurant_name') or '').strip(),
+                            'address': (row.get('address') or '').strip(),
+                        }
+                        fut = executor.submit(_extract_single, normalized, idx, total, enable_google, enable_ddg)
+                        futures[fut] = normalized
                     for future in as_completed(futures):
                         try:
                             result = future.result()
@@ -365,11 +398,9 @@ def api_bulk_find_instagram():
                                 'store_id': row.get('store_id', ''),
                                 'restaurant_name': row.get('restaurant_name', ''),
                                 'address': row.get('address', ''),
-                                'phone': row.get('phone', ''),
                                 'instagram_handle': '',
                                 'status': 'error',
                                 'message': str(e),
-                                'ai_confidence': 0.0,
                                 'confidence_score': 0.0,
                                 'confidence_grade': 'Low'
                             }
@@ -410,9 +441,21 @@ def api_bulk_find_instagram():
                         else:
                             job['results'].append(result)
                         job['completed'] += 1
+                        # Update ETA metrics
+                        elapsed = _time.time() - job.get('created_at', _time.time())
+                        comp = max(1, job['completed'])
+                        avg = elapsed / comp
+                        job['avg_processing_sec'] = avg
+                        remaining = max(0, job['total'] - comp)
+                        job['eta_sec'] = int(remaining * avg)
                 # Done
                 job = app.bulk_jobs.get(job_id_local)
                 if job:
+                    # Add review flags now that results are complete
+                    try:
+                        job['results'] = _add_review_flags(job['results'])
+                    except Exception:
+                        pass
                     job['status'] = 'done'
             except Exception as e:  # pragma: no cover
                 job = app.bulk_jobs.get(job_id_local)
@@ -454,6 +497,8 @@ def api_bulk_status():
         'total': total,
         'completed': completed,
         'percent': percent,
+        'avg_processing_sec': job.get('avg_processing_sec', None),
+        'eta_sec': job.get('eta_sec', None),
         'latest': latest,
         'next_index': len(results)
     })

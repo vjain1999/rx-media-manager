@@ -259,7 +259,9 @@ class RestaurantAnalyzer {
                             label.textContent = 'Processing completed!';
                             label.className = 'text-sm text-green-600 mb-2 font-semibold';
                         } else {
-                            label.textContent = `Processing restaurants... ${data.completed || 0}/${data.total || 0}`;
+                            const eta = (typeof data.eta_sec === 'number') ? ` • ETA: ${Math.max(0, data.eta_sec)}s` : '';
+                            const avg = (typeof data.avg_processing_sec === 'number') ? ` • ~${data.avg_processing_sec.toFixed(1)}s/row` : '';
+                            label.textContent = `Processing restaurants... ${data.completed || 0}/${data.total || 0}${avg}${eta}`;
                         }
                     }
                     const latest = data.latest || [];
