@@ -1,0 +1,105 @@
+{
+  "regressions": [
+    {
+      "restaurant_name": "Antonio's Cucina Italiana",
+      "expected_handle": "antonios_of_beacon_hill_",
+      "original_handle": "antonios_of_beacon_hill_",
+      "fixed_handle": "antoniosrestaurants",
+      "original_accuracy": "correct",
+      "fixed_accuracy": "incorrect",
+      "regression_type": "wrong_handle_found",
+      "original_confidence": 76.2,
+      "original_confidence_grade": "Medium",
+      "processing_time": 2.7179808616638184
+    },
+    {
+      "restaurant_name": "Grotto",
+      "expected_handle": "grottorestaurant",
+      "original_handle": "grottorestaurant",
+      "fixed_handle": "",
+      "original_accuracy": "correct",
+      "fixed_accuracy": "missed",
+      "regression_type": "lost_correct_handle",
+      "original_confidence": 100.0,
+      "original_confidence_grade": "High",
+      "processing_time": 2.568740129470825
+    },
+    {
+      "restaurant_name": "Alexandria Pizza & Grill",
+      "expected_handle": "alexpizzama",
+      "original_handle": "alexpizzama",
+      "fixed_handle": "",
+      "original_accuracy": "correct",
+      "fixed_accuracy": "missed",
+      "regression_type": "lost_correct_handle",
+      "original_confidence": 87.9,
+      "original_confidence_grade": "High",
+      "processing_time": 19.488950967788696
+    },
+    {
+      "restaurant_name": "The Paramount",
+      "expected_handle": "paramountbeaconhill",
+      "original_handle": "paramountbeaconhill",
+      "fixed_handle": "",
+      "original_accuracy": "correct",
+      "fixed_accuracy": "missed",
+      "regression_type": "lost_correct_handle",
+      "original_confidence": 89.5,
+      "original_confidence_grade": "High",
+      "processing_time": 2.347968101501465
+    },
+    {
+      "restaurant_name": "Toro",
+      "expected_handle": "toroboston",
+      "original_handle": "toroboston",
+      "fixed_handle": "",
+      "original_accuracy": "correct",
+      "fixed_accuracy": "missed",
+      "regression_type": "lost_correct_handle",
+      "original_confidence": 93.4,
+      "original_confidence_grade": "High",
+      "processing_time": 7.262418985366821
+    }
+  ],
+  "patterns": {
+    "by_type": {
+      "wrong_handle_found": 1,
+      "lost_correct_handle": 4
+    },
+    "by_confidence": {
+      "High": 4,
+      "Medium": 1,
+      "Low": 0
+    },
+    "by_name_complexity": {
+      "simple": 4,
+      "complex": 1
+    },
+    "by_expected_availability": {
+      "available": 5,
+      "not_available": 0
+    },
+    "common_characteristics": [],
+    "potential_causes": []
+  },
+  "root_causes": [
+    "SIMPLIFIED QUERIES: Fixed version uses fewer, simpler queries which may miss some handles",
+    "COMPLEX NAMES: Restaurants with long/complex names may need more diverse query strategies",
+    "HIGH-CONFIDENCE LOSSES: Lost some handles that original system was very confident about",
+    "GENERIC TERMS: Restaurants with generic/common names need more specific search strategies"
+  ],
+  "suggestions": [
+    "ADD FALLBACK QUERIES: Include more diverse query patterns for complex restaurant names",
+    "IMPLEMENT HYBRID APPROACH: Use original system's query diversity with fixed system's speed",
+    "ADD LOCATION-SPECIFIC QUERIES: Include more city/neighborhood specific searches",
+    "INCREASE QUERY LIMIT: Try 3-4 queries instead of 2 for difficult cases",
+    "ADD BUSINESS DIRECTORY SEARCHES: Include more Yelp/Google Business specific queries",
+    "GENERIC NAME HANDLING: Add disambiguation for generic restaurant names",
+    "SPECIAL CHARACTER HANDLING: Improve handling of ampersands and special characters"
+  ],
+  "summary": {
+    "total_regressions": 5,
+    "lost_handles": 4,
+    "analysis_timestamp": "2025-09-02T18:00:00"
+  }
+}

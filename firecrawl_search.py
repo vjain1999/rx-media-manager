@@ -22,9 +22,69 @@ def _get_fc_thread_lock():
         _fc_thread_lock = threading.Lock()
     return _fc_thread_lock
 
-async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: str, phone: str) -> Optional[str]:
+async def _parse_location_components_async(address: str) -> dict:
+    """Async version of LLM-based address parsing."""
+    try:
+        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        prompt = f"""Parse this address into components. Return only valid JSON.
+
+Address: {address}
+
+Extract:
+- street: street number and name
+- city: city name
+- state: state abbreviation (2 letters)
+- zip: zip code if present
+- neighborhood: neighborhood/area if mentioned
+
+Return JSON format:
+{{"street": "value", "city": "value", "state": "value", "zip": "value", "neighborhood": "value"}}
+
+Only include fields that have actual values. Use null for missing information."""
+
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            temperature=0
+        )
+        
+        result_text = response.choices[0].message.content.strip()
+        
+        # Extract JSON from response
+        import json
+        start = result_text.find('{')
+        end = result_text.rfind('}') + 1
+        
+        if start != -1 and end != -1:
+            json_str = result_text[start:end]
+            parsed = json.loads(json_str)
+            
+            # Clean and validate the parsed data
+            location = {'raw_address': address}
+            for key in ['street', 'city', 'state', 'zip', 'neighborhood']:
+                value = parsed.get(key)
+                if value and value.lower() not in ['null', 'none', 'n/a', '']:
+                    location[key] = str(value).strip()
+            
+            return location
+        
+    except Exception as e:
+        print(f"   ⚠️ Async address parsing failed: {e}")
+    
+    # Fallback to regex
+    city_match = re.search(r',\s*([^,]+),\s*([A-Z]{2})', address)
+    if city_match:
+        return {
+            'city': city_match.group(1).strip(),
+            'state': city_match.group(2).strip(),
+            'raw_address': address
+        }
+    return {'raw_address': address}
+
+async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: str, phone: str) -> tuple[Optional[str], dict]:
     """
-    Use Firecrawl search to find restaurant Instagram handle, then analyze with OpenAI.
+    Enhanced Firecrawl search with location context and validation data.
     
     Args:
         restaurant_name: Name of the restaurant
@@ -32,24 +92,26 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
         phone: Restaurant phone number
         
     Returns:
-        Instagram handle (without @) if found, None otherwise
+        Tuple of (Instagram handle, validation_data dict)
     """
     
     if not FIRECRAWL_AVAILABLE:
         print("   ⚠️ Firecrawl not available, skipping")
-        return None
+        return None, {}
         
     if not settings.firecrawl_api_key:
         print("   ⚠️ Firecrawl API key not configured, skipping")
-        return None
+        return None, {}
     
     if not settings.openai_api_key:
         print("   ⚠️ OpenAI API key not configured, skipping")
-        return None
+        return None, {}
     
-    # Extract city/location from address for better search
-    city_match = re.search(r',\s*([^,]+),\s*[A-Z]{2}', address)
-    city = city_match.group(1) if city_match else ""
+    # Parse location components using LLM
+    location = await _parse_location_components_async(address)
+    city = location.get('city', '')
+    state = location.get('state', '')
+    neighborhood = location.get('neighborhood', '')
     
     try:
         print(f"🔥 Using Firecrawl search for: {restaurant_name}")
@@ -57,18 +119,60 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
         # Initialize Firecrawl
         app = AsyncFirecrawlApp(api_key=settings.firecrawl_api_key)
         
-        # Create comprehensive search queries targeting specific sites
-        search_queries = [
-            f"{restaurant_name} {address} instagram social media",
-            f"{restaurant_name} {address} site:yelp.com",
-            f"{restaurant_name} {address} site:tripadvisor.com",
-            f"{restaurant_name} {city} instagram handle",
-            f"{restaurant_name} {city} social media profiles",
-        ]
+        # Balanced search queries - mix of general and location-specific
+        search_queries = []
+        
+        # Start with direct Instagram searches (most likely to find handles)
+        search_queries.extend([
+            f'"{restaurant_name}" instagram',
+            f'"{restaurant_name}" site:instagram.com',
+            f'{restaurant_name} instagram handle'
+        ])
+        
+        # Location-specific Instagram searches
+        if city and state:
+            search_queries.extend([
+                f'"{restaurant_name}" {city} instagram',
+                f'"{restaurant_name}" "{city}" {state} instagram social media'
+            ])
+        
+        # Business directory searches (often have social media links)
+        search_queries.extend([
+            f'"{restaurant_name}" site:yelp.com',
+            f'"{restaurant_name}" site:tripadvisor.com'
+        ])
+        
+        # Address-specific searches (for verification)
+        if address:
+            search_queries.extend([
+                f'"{restaurant_name}" "{address}" instagram',
+                f'"{restaurant_name}" "{address}" social media'
+            ])
+        
+        # Google My Business (for validation)
+        if city and state:
+            search_queries.append(f'site:google.com/maps "{restaurant_name}" {city} {state}')
+        
+        # Fallback if no location parsed
+        if not city and not state:
+            search_queries = [
+                f'"{restaurant_name}" instagram',
+                f'"{restaurant_name}" site:instagram.com',
+                f'"{restaurant_name}" site:yelp.com',
+                f'{restaurant_name} instagram handle'
+            ]
         
         all_content = []
+        validation_data = {
+            'sources_checked': [],
+            'location_matches': [],
+            'google_my_business_found': False,
+            'yelp_found': False,
+            'tripadvisor_found': False,
+            'queries_used': []
+        }
         
-        for i, query in enumerate(search_queries[:3]):  # Try first 3 queries
+        for i, query in enumerate(search_queries[:5]):  # Try first 5 queries
             print(f"   🔍 Firecrawl query {i+1}: {query}")
             
             try:
@@ -85,9 +189,17 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
                 if response and response.get('success') and response.get('data'):
                     results_count = len(response['data'])
                     print(f"   📋 Query {i+1} found {results_count} results")
+                    # Verbose: list result URLs and titles
+                    for idx, item in enumerate(response['data']):
+                        title = (item.get('title') or '')[:120]
+                        url = item.get('url') or ''
+                        print(f"      {i+1}.{idx+1} • {title} | {url}")
                     
-                    # Extract content from this query
-                    content = _extract_content_from_response(response)
+                    # Track validation data
+                    validation_data['queries_used'].append(query)
+                    
+                    # Extract content and track sources
+                    content = _extract_content_from_response(response, validation_data, city, state)
                     if content:
                         all_content.append(content)
                 else:
@@ -105,22 +217,26 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
         
         if not all_content:
             print("   ❌ No content found in any Firecrawl results")
-            return None
+            return None, validation_data
         
         # Combine all content and analyze with OpenAI
         combined_content = "\n\n".join(all_content)
+        # Verbose: list candidate handles seen in combined content
+        candidates = _extract_candidate_handles(combined_content)
+        if candidates:
+            print(f"   🔎 Candidate handles (regex): {sorted(list(candidates))[:12]}")
         handle = await _analyze_content_with_openai(combined_content, restaurant_name, address)
         
         if handle:
             print(f"   ✅ Firecrawl + OpenAI found handle: @{handle}")
-            return handle
+            return handle, validation_data
         else:
             print("   ❌ No Instagram handle found in Firecrawl results")
-            return None
+            return None, validation_data
             
     except Exception as e:
         print(f"   ❌ Firecrawl search failed: {e}")
-        return None
+        return None, {}
     finally:
         # Ensure Firecrawl client closes its async resources before loop closes
         try:
@@ -129,7 +245,7 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
         except Exception:
             pass
 
-def _extract_content_from_response(response) -> Optional[str]:
+def _extract_content_from_response(response, validation_data: dict = None, city: str = "", state: str = "") -> Optional[str]:
     """Extract relevant content from Firecrawl search response."""
     try:
         if not response or not response.get('success'):
@@ -146,6 +262,27 @@ def _extract_content_from_response(response) -> Optional[str]:
             description = item.get('description', '')
             url = item.get('url', '')
             markdown = item.get('markdown', '')
+            
+            # Track validation data if provided
+            if validation_data is not None:
+                validation_data['sources_checked'].append(url)
+                
+                # Check for Google My Business
+                if 'google.com/maps' in url or 'google.com/search' in url:
+                    validation_data['google_my_business_found'] = True
+                
+                # Check for other important sources
+                if 'yelp.com' in url:
+                    validation_data['yelp_found'] = True
+                if 'tripadvisor.com' in url:
+                    validation_data['tripadvisor_found'] = True
+                
+                # Check for location matches in content
+                all_text = f"{title} {description} {markdown}".lower()
+                if city and city.lower() in all_text:
+                    validation_data['location_matches'].append(f"city:{city}")
+                if state and state.lower() in all_text:
+                    validation_data['location_matches'].append(f"state:{state}")
             
             # Combine all available text
             item_content = []
@@ -193,6 +330,17 @@ Rules:
 - If no Instagram handle is found, return "NOT_FOUND"
 - Do not include @, instagram.com, or any other text - just the handle
 
+ Location weighting (very important):
+ - Strongly prefer handles that clearly match the provided address/city/neighborhood in their profile or page context.
+ - If there is a location-specific handle (e.g., antonios_of_beacon_hill_) and a corporate/brand-wide handle (e.g., antoniosrestaurants), choose the location-specific handle.
+ - Prefer usernames that include the restaurant name plus city/neighborhood tokens when available.
+ - Only choose a corporate or brand-wide account if no location-specific handle exists and the brand clearly maps to this merchant.
+
+ Use each result's Description field:
+ - The content contains entries with Title, Description, and URL per result. Treat Description as a strong source of location evidence.
+ - If a Description includes the exact street address or the correct city/neighborhood, prefer the associated handle over others.
+ - Deprioritize handles tied to Descriptions mentioning a different city/state or unrelated location.
+
 Restaurant Instagram handle:"""
 
         response = await client.chat.completions.create(
@@ -209,6 +357,10 @@ Restaurant Instagram handle:"""
             handle = re.sub(r'[^a-zA-Z0-9._]', '', result)
             if handle and len(handle) > 0:
                 print(f"   🔍 Handle extraction: {handle}")
+                # If LLM picked something not present in regex candidates, note it
+                cands = _extract_candidate_handles(content)
+                if handle.lower() not in cands:
+                    print(f"   ⚠️ LLM-picked handle not in regex candidates: {handle}")
                 return handle
         
         print(f"   🔍 Handle extraction: NOT_FOUND")
@@ -224,7 +376,21 @@ Restaurant Instagram handle:"""
         except Exception:
             pass
 
-def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: str, phone: str) -> Optional[str]:
+def _extract_candidate_handles(text: str) -> set[str]:
+    """Extract possible IG handles via regex from text (urls and mentions)."""
+    candidates: set[str] = set()
+    try:
+        # instagram.com/<handle>
+        for m in re.findall(r"instagram\.com/([A-Za-z0-9._]+)", text, flags=re.I):
+            candidates.add(m.lower())
+        # @handle mentions
+        for m in re.findall(r"@([A-Za-z0-9._]{2,})", text):
+            candidates.add(m.lower())
+    except Exception:
+        pass
+    return candidates
+
+def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: str, phone: str) -> tuple[Optional[str], dict]:
     """Synchronous wrapper for the async Firecrawl search function."""
     try:
         # Simple global rate limit ≤ 1 rps using thread lock
@@ -240,13 +406,18 @@ def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: st
 
         # Use a dedicated event loop per call (isolated from threadpools)
         loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return loop.run_until_complete(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))
         finally:
             try:
+                # Give async clients time to cleanup properly
+                pending = asyncio.all_tasks(loop)
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 loop.close()
             except Exception:
                 pass
     except Exception as e:
         print(f"   ❌ Firecrawl sync wrapper failed: {e}")
-        return None
+        return None, {}

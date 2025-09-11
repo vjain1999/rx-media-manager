@@ -315,9 +315,24 @@ def api_bulk_find_instagram():
         # Read CSV
         stream = io.StringIO(file.stream.read().decode('utf-8', errors='ignore'))
         reader = csv.DictReader(stream)
-        required_cols = {'business_id', 'restaurant_name', 'address'}
-        if not required_cols.issubset({c.strip() for c in reader.fieldnames or []}):
-            return jsonify({'error': 'CSV must include columns: business_id, restaurant_name, address'}), 400
+        available_cols = {c.strip() for c in reader.fieldnames or []}
+        
+        # Check for required columns - need at least one ID field
+        has_business_id = 'business_id' in available_cols
+        has_store_id = 'store_id' in available_cols
+        has_required_fields = ('restaurant_name' in available_cols and 
+                              'address' in available_cols and
+                              (has_business_id or has_store_id))
+        
+        if not has_required_fields:
+            missing_fields = []
+            if not has_business_id and not has_store_id:
+                missing_fields.append('business_id or store_id')
+            if 'restaurant_name' not in available_cols:
+                missing_fields.append('restaurant_name')
+            if 'address' not in available_cols:
+                missing_fields.append('address')
+            return jsonify({'error': f'CSV must include columns: {", ".join(missing_fields)}'}), 400
 
         rows = list(reader)
 
@@ -347,32 +362,50 @@ def api_bulk_find_instagram():
                             row = futures[future]
                             result = {
                                 'business_id': row.get('business_id', ''),
+                                'store_id': row.get('store_id', ''),
                                 'restaurant_name': row.get('restaurant_name', ''),
                                 'address': row.get('address', ''),
                                 'phone': row.get('phone', ''),
                                 'instagram_handle': '',
                                 'status': 'error',
-                                'message': str(e)
+                                'message': str(e),
+                                'ai_confidence': 0.0,
+                                'confidence_score': 0.0,
+                                'confidence_grade': 'Low'
                             }
-                        # Deduplicate by business_id, choose the most likely/common handle
+                        # Deduplicate by business_id or store_id, choose the most likely/common handle
                         job = app.bulk_jobs.get(job_id_local)
                         if not job:
                             continue
                         existing = job['results']
+                        
+                        # Create a unique key from available IDs
                         bid = (result.get('business_id') or '').strip()
-                        if bid:
-                            # gather all results so far for this business_id including new one
-                            candidates = [r for r in existing if (r.get('business_id') or '').strip() == bid]
+                        store_id = (result.get('store_id') or '').strip()
+                        unique_key = bid if bid else store_id
+                        
+                        if unique_key:
+                            # gather all results so far for this ID including new one
+                            def matches_key(r):
+                                r_bid = (r.get('business_id') or '').strip()
+                                r_store_id = (r.get('store_id') or '').strip()
+                                r_key = r_bid if r_bid else r_store_id
+                                return r_key == unique_key
+                            
+                            candidates = [r for r in existing if matches_key(r)]
                             candidates.append(result)
-                            # score: prefer explicit ok over probable over not_found/error; then higher AI confidence if present
+                            
+                            # score: prefer explicit ok over probable over not_found/error; then higher confidence
                             def score(r):
                                 status = r.get('status', '')
                                 s = 2 if status == 'ok' else 1 if status == 'probable' else 0
-                                conf = r.get('ai_confidence', 0.0)
-                                return (s, conf)
+                                conf = r.get('confidence_score', 0.0)
+                                ai_conf = r.get('ai_confidence', 0.0)
+                                return (s, conf, ai_conf)
+                            
                             best = sorted(candidates, key=score, reverse=True)[0]
-                            # remove previous entries for this business_id
-                            job['results'] = [r for r in existing if (r.get('business_id') or '').strip() != bid]
+                            # remove previous entries for this ID
+                            job['results'] = [r for r in existing if not matches_key(r)]
                             job['results'].append(best)
                         else:
                             job['results'].append(result)
@@ -432,7 +465,7 @@ def api_bulk_download():
     if not job:
         return jsonify({'error': 'job not found'}), 404
     results = job.get('results', [])
-    headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message']
+    headers = ['business_id','store_id','restaurant_name','address','phone','instagram_handle','status','message','confidence_score','confidence_grade','ai_confidence']
     import csv as _csv
     from io import StringIO
     buf = StringIO()

@@ -319,10 +319,58 @@ class RestaurantAnalyzer {
 
     renderBulkTable(rows) {
         if (!rows || rows.length === 0) return '<div class="text-gray-500">No results.</div>';
-        const headers = ['business_id','restaurant_name','address','phone','instagram_handle','status','message'];
-        const thead = '<thead><tr>' + headers.map(h => `<th class="px-3 py-2 text-left border-b">${h}</th>`).join('') + '</tr></thead>';
-        const tbody = '<tbody>' + rows.map(r => '<tr>' + headers.map(h => `<td class="px-3 py-2 border-b">${(r[h] ?? '').toString()}</td>`).join('') + '</tr>').join('') + '</tbody>';
-        return `<table class="min-w-full">${thead}${tbody}</table>`;
+        const headers = ['business_id','store_id','restaurant_name','address','phone','instagram_handle','status','confidence_grade','confidence_score','message'];
+        const thead = '<thead><tr>' + headers.map(h => {
+            // Format header names for better display
+            const displayName = h.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            return `<th class="px-3 py-2 text-left border-b text-xs font-semibold text-gray-600">${displayName}</th>`;
+        }).join('') + '</tr></thead>';
+        
+        const tbody = '<tbody>' + rows.map(r => '<tr class="hover:bg-gray-50">' + headers.map(h => {
+            let cellValue = (r[h] ?? '').toString();
+            let cellClass = 'px-3 py-2 border-b text-sm';
+            
+            // Special formatting for certain columns
+            if (h === 'confidence_grade') {
+                const grade = cellValue;
+                let gradeClass = 'px-2 py-1 rounded text-xs font-semibold ';
+                if (grade === 'High') {
+                    gradeClass += 'bg-green-100 text-green-800';
+                } else if (grade === 'Medium') {
+                    gradeClass += 'bg-yellow-100 text-yellow-800';
+                } else if (grade === 'Low') {
+                    gradeClass += 'bg-red-100 text-red-800';
+                } else {
+                    gradeClass += 'bg-gray-100 text-gray-800';
+                }
+                cellValue = `<span class="${gradeClass}">${grade}</span>`;
+            } else if (h === 'confidence_score') {
+                const score = parseFloat(cellValue);
+                if (!isNaN(score)) {
+                    cellValue = `${score.toFixed(1)}%`;
+                }
+            } else if (h === 'status') {
+                const status = cellValue;
+                let statusClass = 'px-2 py-1 rounded text-xs font-medium ';
+                if (status === 'ok') {
+                    statusClass += 'bg-green-100 text-green-800';
+                } else if (status === 'probable') {
+                    statusClass += 'bg-yellow-100 text-yellow-800';
+                } else if (status === 'not_found') {
+                    statusClass += 'bg-gray-100 text-gray-800';
+                } else if (status === 'error') {
+                    statusClass += 'bg-red-100 text-red-800';
+                }
+                cellValue = `<span class="${statusClass}">${status}</span>`;
+            } else if (h === 'instagram_handle' && cellValue) {
+                // Make Instagram handles clickable
+                cellValue = `<a href="https://www.instagram.com/${cellValue.replace('@', '')}/" target="_blank" class="text-blue-600 hover:underline">@${cellValue.replace('@', '')}</a>`;
+            }
+            
+            return `<td class="${cellClass}">${cellValue}</td>`;
+        }).join('') + '</tr>').join('') + '</tbody>';
+        
+        return `<div class="overflow-x-auto"><table class="min-w-full">${thead}${tbody}</table></div>`;
     }
 
     downloadBulkCSV() {
