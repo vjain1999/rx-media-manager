@@ -14,7 +14,7 @@ import argparse
 import random
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from web_search import RestaurantInstagramFinder
@@ -103,8 +103,22 @@ def process_single_restaurant_extract(restaurant: Dict, index: int, total: int, 
         }
 
 
-def process_dataset_extract(restaurants: List[Dict], max_workers: int = 6, starts_per_sec: float = 1.5, shuffle: bool = True, enable_google: bool = True, enable_ddg: bool = True) -> List[Dict]:
-    """Run extraction-only flow with optional start-rate throttling and shuffling."""
+def process_dataset_extract(
+    restaurants: List[Dict],
+    max_workers: int = 6,
+    starts_per_sec: float = 1.5,
+    shuffle: bool = True,
+    enable_google: bool = True,
+    enable_ddg: bool = True,
+    save_every: int = 0,
+    jsonl_path: str = "",
+    latest_json_path: str = "",
+    latest_csv_path: str = "",
+) -> List[Dict]:
+    """Run extraction-only flow with optional start-rate throttling and shuffling.
+
+    If save_every > 0, results are streamed to JSONL and periodic snapshots are written.
+    """
     print(f"🚀 Starting extraction for {len(restaurants)} rows with {max_workers} workers...")
     if shuffle:
         print("🔀 Shuffling input order")
@@ -112,12 +126,39 @@ def process_dataset_extract(restaurants: List[Dict], max_workers: int = 6, start
 
     start_time = time.time()
     results: List[Dict] = []
+    jsonl_file = None
+
+    def _write_latest_snapshot():
+        try:
+            if not results:
+                return
+            if latest_json_path:
+                with open(latest_json_path, "w", encoding="utf-8") as jf:
+                    json.dump(results, jf, indent=2, ensure_ascii=False)
+            if latest_csv_path:
+                fieldnames = list(results[0].keys())
+                with open(latest_csv_path, "w", newline="", encoding="utf-8") as cf:
+                    writer = csv.DictWriter(cf, fieldnames=fieldnames)
+                    writer.writeheader()
+                    writer.writerows(results)
+            if latest_json_path or latest_csv_path:
+                print(f"💾 Snapshot saved: {latest_json_path or '[json disabled]'} | {latest_csv_path or '[csv disabled]'}")
+        except Exception as snapshot_err:
+            print(f"⚠️ Failed to write snapshot: {snapshot_err}")
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_restaurant = {}
         last_start_ts = 0.0
         min_interval = (1.0 / starts_per_sec) if starts_per_sec and starts_per_sec > 0 else 0.0
         total = len(restaurants)
+
+        # Prepare JSONL stream file if requested
+        if jsonl_path:
+            try:
+                jsonl_file = open(jsonl_path, "a", encoding="utf-8")
+            except Exception as e:
+                print(f"⚠️ Could not open JSONL stream file '{jsonl_path}': {e}")
+                jsonl_file = None
 
         for i, restaurant in enumerate(restaurants):
             if min_interval > 0:
@@ -140,28 +181,52 @@ def process_dataset_extract(restaurants: List[Dict], max_workers: int = 6, start
             future_to_restaurant[fut] = restaurant
 
         completed = 0
-        for future in as_completed(future_to_restaurant):
+        try:
+            for future in as_completed(future_to_restaurant):
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as exc:
+                    r = future_to_restaurant[future]
+                    results.append({
+                        'business_id': r.get('business_id', ''),
+                        'store_id': r.get('store_id', ''),
+                        'restaurant_name': r.get('restaurant_name', ''),
+                        'address': r.get('address', ''),
+                        'instagram_handle': '',
+                        'confidence_score': 0.0,
+                        'confidence_grade': 'Error',
+                        'discovery_method': '',
+                        'status': 'error',
+                        'message': str(exc),
+                        'processing_time': 0.0,
+                    })
+
+                # Stream to JSONL if enabled
+                if jsonl_file is not None:
+                    try:
+                        jsonl_file.write(json.dumps(results[-1], ensure_ascii=False) + "\n")
+                        jsonl_file.flush()
+                    except Exception as stream_err:
+                        print(f"⚠️ Failed to append to JSONL stream: {stream_err}")
+
+                completed += 1
+                if completed % 10 == 0 or completed == total:
+                    print(f"🧭 Progress: {completed}/{total}")
+
+                # Periodic snapshot
+                if save_every > 0 and (completed % save_every == 0):
+                    _write_latest_snapshot()
+        except KeyboardInterrupt:
+            print("\n🛑 Interrupted by user. Writing last snapshot before exit...")
+            _write_latest_snapshot()
+            raise
+        finally:
             try:
-                result = future.result()
-                results.append(result)
-            except Exception as exc:
-                r = future_to_restaurant[future]
-                results.append({
-                    'business_id': r.get('business_id', ''),
-                    'store_id': r.get('store_id', ''),
-                    'restaurant_name': r.get('restaurant_name', ''),
-                    'address': r.get('address', ''),
-                    'instagram_handle': '',
-                    'confidence_score': 0.0,
-                    'confidence_grade': 'Error',
-                    'discovery_method': '',
-                    'status': 'error',
-                    'message': str(exc),
-                    'processing_time': 0.0,
-                })
-            completed += 1
-            if completed % 10 == 0 or completed == total:
-                print(f"🧭 Progress: {completed}/{total}")
+                if jsonl_file is not None:
+                    jsonl_file.close()
+            except Exception:
+                pass
 
     elapsed = time.time() - start_time
     found_count = sum(1 for r in results if (r.get('instagram_handle') or '').strip())
@@ -187,16 +252,23 @@ def add_review_flags(results: List[Dict]) -> List[Dict]:
         r['review'] = 'FLAG' if bid in flagged else ''
     return results
 
-def save_extract_results(results: List[Dict]) -> Dict[str, str]:
-    """Save extraction results to timestamped JSON and CSV.
+def save_extract_results(results: List[Dict], output_basename: Optional[str] = None) -> Dict[str, str]:
+    """Save extraction results to JSON and CSV with improved naming.
 
-    Returns a dict with file paths.
+    If output_basename is provided, files are named:
+      results/{output_basename}_final.json
+      results/{output_basename}_final.csv
+    Otherwise, fall back to legacy timestamped naming.
     """
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = Path("results")
     results_dir.mkdir(parents=True, exist_ok=True)
-    json_file = str(results_dir / f"full_system_extract_results_{ts}.json")
-    csv_file = str(results_dir / f"full_system_extract_results_{ts}.csv")
+    if output_basename:
+        json_file = str(results_dir / f"{output_basename}_final.json")
+        csv_file = str(results_dir / f"{output_basename}_final.csv")
+    else:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        json_file = str(results_dir / f"full_system_extract_results_{ts}.json")
+        csv_file = str(results_dir / f"full_system_extract_results_{ts}.csv")
 
     with open(json_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
@@ -221,12 +293,25 @@ def main():
     parser.add_argument("--shuffle", dest="shuffle", action="store_true", help="Shuffle input rows before processing")
     parser.add_argument("--enable-google", dest="enable_google", action="store_true", help="Enable Google Custom Search strategy")
     parser.add_argument("--enable-ddg", dest="enable_ddg", action="store_true", help="Enable DuckDuckGo strategy")
+    parser.add_argument("--save-every", dest="save_every", type=int, default=100, help="Write snapshot every N completed rows (0 to disable)")
+    parser.add_argument("--output-prefix", dest="output_prefix", default="", help="Custom output prefix for results naming")
     args = parser.parse_args()
 
     print("🔧 FULL INSTAGRAM DISCOVERY SYSTEM: EXTRACTION-ONLY RUN")
     print("=" * 80)
 
     restaurants = load_input_dataset(args.csv_path)
+
+    # Derive output naming and streaming paths
+    results_dir = Path("results")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    input_stem = Path(args.csv_path).stem.replace(" ", "_")
+    base_name = (args.output_prefix.strip() or f"full_extract_{input_stem}_{ts}")
+    jsonl_path = str(results_dir / f"{base_name}.jsonl")
+    latest_json = str(results_dir / f"{base_name}_latest.json")
+    latest_csv = str(results_dir / f"{base_name}_latest.csv")
+
     results = process_dataset_extract(
         restaurants,
         max_workers=max(1, args.workers),
@@ -234,13 +319,18 @@ def main():
         shuffle=bool(args.shuffle),
         enable_google=bool(args.enable_google),
         enable_ddg=bool(args.enable_ddg),
+        save_every=max(0, int(args.save_every)),
+        jsonl_path=jsonl_path,
+        latest_json_path=latest_json,
+        latest_csv_path=latest_csv,
     )
     results = add_review_flags(results)
-    files = save_extract_results(results)
+    files = save_extract_results(results, output_basename=base_name)
 
     print("\n📁 Output Files:")
     print(f"  • JSON: {files['json']}")
     print(f"  • CSV:  {files['csv']}")
+    print(f"  • JSONL stream: {jsonl_path}")
 
 
 if __name__ == "__main__":
