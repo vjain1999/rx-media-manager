@@ -221,6 +221,13 @@ class RestaurantInstagramFinder:
             reason = str(data.get('reason', ''))
             return plausible and conf >= settings.ai_verification_min_confidence, conf, reason
         except Exception as e:
+            # Log route and error for diagnostics
+            try:
+                from openai_client import current_openai_route_info
+                route = current_openai_route_info()
+                print(f"   ⚠️ AI verify error via {route.get('provider')} ({route.get('base_url')}): {e}")
+            except Exception:
+                pass
             return True, 1.0, f"AI verify skipped: {e}"
     
     def _calculate_confidence_score(self, restaurant_name: str, address: str, phone: str, 

@@ -375,13 +375,16 @@ Restaurant Instagram handle:"""
         return None
         
     except Exception as e:
-        # Adaptive backoff on OpenAI rate limit
+        # Adaptive backoff on OpenAI rate limit / connection issues
         msg = str(e)
-        if '429' in msg or 'rate limit' in msg.lower():
+        if any(k in msg.lower() for k in ['429', 'rate limit', 'retry-after']):
             retry_after = _extract_retry_after_seconds(e) or 15
             global _OPENAI_COOLDOWN_UNTIL
             _OPENAI_COOLDOWN_UNTIL = time.time() + retry_after
             print(f"   ⚠️ OpenAI rate-limited. Backing off {retry_after}s...")
+        elif any(k in msg.lower() for k in ['connection error', 'connect timeout', 'read timeout', 'service unavailable', 'bad gateway']):
+            print("   ⚠️ OpenAI connection issue. Backing off 5s...")
+            _OPENAI_COOLDOWN_UNTIL = time.time() + 5
         else:
             print(f"   ❌ OpenAI analysis failed: {e}")
         return None

@@ -5,6 +5,7 @@ Portkey without changing call sites across the codebase.
 """
 
 import os
+import logging
 from typing import Dict
 from openai import OpenAI, AsyncOpenAI
 
@@ -40,5 +41,33 @@ def make_direct_openai_client(async_client: bool = False):
     """Return a client that talks directly to OpenAI (bypassing Portkey)."""
     kwargs: Dict = {"api_key": OPENAI_API_KEY}
     return AsyncOpenAI(**kwargs) if async_client else OpenAI(**kwargs)
+
+
+def current_openai_route_info() -> Dict:
+    """Return the effective routing info for logging/diagnostics."""
+    if USE_PORTKEY:
+        return {
+            "provider": "portkey",
+            "base_url": PORTKEY_BASE_URL,
+            "has_virtual_key": bool(PORTKEY_VIRTUAL_KEY),
+            "has_api_key": bool(PORTKEY_API_KEY),
+        }
+    return {
+        "provider": "openai",
+        "base_url": "https://api.openai.com/v1",
+        "has_api_key": bool(OPENAI_API_KEY),
+    }
+
+
+# One-time boot log to confirm route in app logs
+try:
+    _logger = logging.getLogger(__name__)
+    route = current_openai_route_info()
+    _logger.info(
+        "OpenAI route configured: provider=%s base_url=%s",
+        route.get("provider"), route.get("base_url")
+    )
+except Exception:
+    pass
 
 
