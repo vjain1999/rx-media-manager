@@ -1,6 +1,7 @@
 """Firecrawl-based web search for finding restaurant Instagram handles."""
 
 import asyncio
+import time
 from typing import Optional
 import openai
 import re
@@ -14,6 +15,9 @@ except ImportError:
     print("⚠️ Firecrawl not available. Install with: pip install firecrawl-py")
 
 _last_fc_call_sync: float = 0.0
+# Adaptive throttling state (based on server rate-limit headers / 429s)
+_OPENAI_COOLDOWN_UNTIL: float = 0.0
+_FIRECRAWL_COOLDOWN_UNTIL: float = 0.0
 _fc_thread_lock = None
 def _get_fc_thread_lock():
     import threading
@@ -208,9 +212,12 @@ async def firecrawl_search_restaurant_instagram(restaurant_name: str, address: s
             except Exception as query_error:
                 msg = str(query_error)
                 if '429' in msg or 'rate limit' in msg.lower():
-                    # Backoff on rate limit
-                    print("   ⚠️ Firecrawl rate-limited. Backing off 12s...")
-                    await asyncio.sleep(12)
+                    # Backoff on rate limit using Retry-After header if available
+                    retry_after = _extract_retry_after_seconds(query_error) or 12
+                    global _FIRECRAWL_COOLDOWN_UNTIL
+                    _FIRECRAWL_COOLDOWN_UNTIL = time.time() + retry_after
+                    print(f"   ⚠️ Firecrawl rate-limited. Backing off {retry_after}s...")
+                    await asyncio.sleep(retry_after)
                 else:
                     print(f"   ❌ Query {i+1} failed: {query_error}")
                 continue
@@ -367,7 +374,15 @@ Restaurant Instagram handle:"""
         return None
         
     except Exception as e:
-        print(f"   ❌ OpenAI analysis failed: {e}")
+        # Adaptive backoff on OpenAI rate limit
+        msg = str(e)
+        if '429' in msg or 'rate limit' in msg.lower():
+            retry_after = _extract_retry_after_seconds(e) or 15
+            global _OPENAI_COOLDOWN_UNTIL
+            _OPENAI_COOLDOWN_UNTIL = time.time() + retry_after
+            print(f"   ⚠️ OpenAI rate-limited. Backing off {retry_after}s...")
+        else:
+            print(f"   ❌ OpenAI analysis failed: {e}")
         return None
     finally:
         # Ensure HTTPX async client is closed before event loop ends
@@ -421,3 +436,46 @@ def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: st
     except Exception as e:
         print(f"   ❌ Firecrawl sync wrapper failed: {e}")
         return None, {}
+
+# ===== Adaptive throttling helpers =====
+def _parse_retry_after_header(value: str) -> float:
+    try:
+        # Numeric seconds
+        secs = float(value)
+        if secs >= 0:
+            return secs
+    except Exception:
+        pass
+    # HTTP-date not handled; fallback
+    return 0.0
+
+def _extract_retry_after_seconds(exc: Exception) -> float:
+    """Attempt to extract Retry-After seconds from exceptions with response headers."""
+    try:
+        # httpx / requests style
+        resp = getattr(exc, 'response', None)
+        headers = getattr(resp, 'headers', None)
+        if headers and isinstance(headers, dict):
+            ra = headers.get('Retry-After') or headers.get('retry-after')
+            if ra:
+                secs = _parse_retry_after_header(ra)
+                if secs > 0:
+                    return secs
+        # OpenAI SDK may attach metadata
+        hdrs = getattr(exc, 'headers', None)
+        if hdrs and isinstance(hdrs, dict):
+            ra = hdrs.get('Retry-After') or hdrs.get('retry-after')
+            if ra:
+                secs = _parse_retry_after_header(ra)
+                if secs > 0:
+                    return secs
+    except Exception:
+        pass
+    return 0.0
+
+def get_rate_cooldowns() -> tuple[float, float]:
+    """Return remaining cooldown seconds for (openai, firecrawl)."""
+    now = time.time()
+    openai_rem = max(0.0, _OPENAI_COOLDOWN_UNTIL - now)
+    firecrawl_rem = max(0.0, _FIRECRAWL_COOLDOWN_UNTIL - now)
+    return openai_rem, firecrawl_rem

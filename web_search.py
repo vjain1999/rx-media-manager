@@ -809,6 +809,7 @@ Only include fields that have actual values. Use null for missing information.""
         
         try:
             from gpt_native_search import gpt_search_restaurant_instagram
+            # Consider adaptive throttling via OpenAI handled in downstream libs
             return gpt_search_restaurant_instagram(restaurant_name, address, phone)
         except Exception as e:
             print(f"   ❌ GPT-4 native search failed: {e}")

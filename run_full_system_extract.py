@@ -18,6 +18,7 @@ from typing import List, Dict, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from web_search import RestaurantInstagramFinder
+from firecrawl_search import get_rate_cooldowns
 
 
 def load_input_dataset(csv_path: Union[str, Path]) -> List[Dict]:
@@ -125,6 +126,15 @@ def process_dataset_extract(restaurants: List[Dict], max_workers: int = 6, start
                 if elapsed < min_interval:
                     time.sleep(min_interval - elapsed)
                 last_start_ts = time.time()
+            # Global adaptive cooldowns based on prior 429s
+            try:
+                openai_wait, firecrawl_wait = get_rate_cooldowns()
+                adaptive_sleep = max(openai_wait, firecrawl_wait)
+                if adaptive_sleep > 0:
+                    print(f"⏳ Backing off {adaptive_sleep:.1f}s due to upstream rate limits...")
+                    time.sleep(adaptive_sleep)
+            except Exception:
+                pass
 
             fut = executor.submit(process_single_restaurant_extract, restaurant, i + 1, total, enable_google, enable_ddg)
             future_to_restaurant[fut] = restaurant
