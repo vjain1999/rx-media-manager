@@ -36,3 +36,9 @@ def make_openai_client(async_client: bool = False):
     return AsyncOpenAI(**kwargs) if async_client else OpenAI(**kwargs)
 
 
+def make_direct_openai_client(async_client: bool = False):
+    """Return a client that talks directly to OpenAI (bypassing Portkey)."""
+    kwargs: Dict = {"api_key": OPENAI_API_KEY}
+    return AsyncOpenAI(**kwargs) if async_client else OpenAI(**kwargs)
+
+

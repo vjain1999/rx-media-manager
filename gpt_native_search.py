@@ -1,6 +1,7 @@
 """GPT-4 web search using OpenAI Responses API for finding restaurant Instagram handles."""
 
 import openai
+from openai_client import make_openai_client, make_direct_openai_client
 from typing import Optional
 from config import settings
 import re
@@ -24,7 +25,8 @@ def gpt_search_restaurant_instagram(restaurant_name: str, address: str, phone: s
     try:
         print(f"🌐 Using GPT-4 Responses API with web search for: {restaurant_name}")
         
-        client = openai.OpenAI(api_key=settings.openai_api_key)
+        # Use direct OpenAI for Responses API (some gateways may not proxy this well)
+        client = make_direct_openai_client(async_client=False)
         
         search_query = f"""
 Find the Instagram handle for this restaurant by searching these specific sources:
