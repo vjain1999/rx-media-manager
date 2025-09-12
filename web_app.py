@@ -561,6 +561,20 @@ def api_bulk_status():
     if job.get('status') in ('done', 'stopped'):
         resp['final'] = True
         resp['all_results'] = results
+        try:
+            started = float(job.get('created_at') or 0)
+            finished = _time.time()
+            total_time = max(0.0, finished - started) if started else None
+            if total_time is not None and total_time > 0 and completed > 0:
+                rows_per_sec = completed / total_time
+                resp['perf'] = {
+                    'total_time_sec': int(total_time),
+                    'avg_row_sec': total_time / completed,
+                    'rows_per_sec': rows_per_sec,
+                    'rows_per_min': rows_per_sec * 60.0
+                }
+        except Exception:
+            pass
     return jsonify(resp)
 
 @app.route('/api/bulk_download', methods=['GET'])

@@ -328,6 +328,12 @@ class RestaurantAnalyzer {
                             };
                             const summaryEl = document.getElementById('igBulkSummary');
                             if (summaryEl) {
+                                const perf = data.perf || {};
+                                const perfHtml = (typeof perf.total_time_sec === 'number') ? `
+                                  <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 text-center col-span-2 md:col-span-2">
+                                    <div class="text-xs text-blue-800">Performance</div>
+                                    <div class="text-sm text-blue-700">Time: ${this.formatDuration(perf.total_time_sec)} • Avg/row: ${this.formatDuration(perf.avg_row_sec || 0)} • ~${(perf.rows_per_min||0).toFixed(1)} rows/min</div>
+                                  </div>` : '';
                                 summaryEl.innerHTML = `
                                     <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
                                       <div class="bg-green-50 border border-green-200 rounded-lg p-3 text-center">
@@ -350,6 +356,7 @@ class RestaurantAnalyzer {
                                         <div class="text-xs text-blue-800">Total</div>
                                         <div class="text-lg font-semibold text-blue-700">${totals.total}</div>
                                       </div>
+                                      ${perfHtml}
                                     </div>`;
                             }
                         } catch (_) {}
