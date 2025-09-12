@@ -226,11 +226,15 @@ class RestaurantAnalyzer {
         const progress = document.createElement('div');
         progress.id = 'bulkProgressBar';
         progress.className = 'w-full bg-gray-200 rounded-full h-6 mb-3';
-        progress.innerHTML = '<div id="bulkProgressInner" class="bg-blue-600 h-6 rounded-full flex items-center justify-center" style="width:0%"></div>';
+        progress.innerHTML = '<div id="bulkProgressInner" class="bg-blue-600 h-6 rounded-full" style="width:0%"></div>';
         
         el.innerHTML = '';
         el.appendChild(progressLabel);
         el.appendChild(progress);
+        // Dedicated container for table so progress elements are not re-rendered each poll
+        const tableContainer = document.createElement('div');
+        tableContainer.id = 'bulkTableContainer';
+        el.appendChild(tableContainer);
         this._bulkSeen = 0; // cursor of rows consumed
         const update = () => {
             if (!this._bulkJobId) return;
@@ -244,12 +248,6 @@ class RestaurantAnalyzer {
                     const inner = document.getElementById('bulkProgressInner');
                     if (inner) {
                         inner.style.width = `${data.percent}%`;
-                        // Add text showing progress
-                        inner.textContent = `${data.completed || 0}/${data.total || 0} (${data.percent}%)`;
-                        inner.style.fontSize = '12px';
-                        inner.style.color = 'white';
-                        inner.style.fontWeight = 'bold';
-                        inner.style.minWidth = '60px'; // Ensure text is visible even at low percentages
                     }
                     
                     // Update progress label
@@ -259,9 +257,10 @@ class RestaurantAnalyzer {
                             label.textContent = 'Processing completed!';
                             label.className = 'text-sm text-green-600 mb-2 font-semibold';
                         } else {
+                            const percent = (typeof data.percent === 'number') ? ` (${data.percent}%)` : '';
                             const eta = (typeof data.eta_sec === 'number') ? ` • ETA: ${Math.max(0, data.eta_sec)}s` : '';
                             const avg = (typeof data.avg_processing_sec === 'number') ? ` • ~${data.avg_processing_sec.toFixed(1)}s/row` : '';
-                            label.textContent = `Processing restaurants... ${data.completed || 0}/${data.total || 0}${avg}${eta}`;
+                            label.textContent = `Processing restaurants... ${data.completed || 0}/${data.total || 0}${percent}${avg}${eta}`;
                         }
                     }
                     const latest = data.latest || [];
@@ -274,7 +273,9 @@ class RestaurantAnalyzer {
                         } else {
                             this._bulkSeen = (this._bulkSeen || 0) + latest.length;
                         }
-                        el.innerHTML = progressLabel.outerHTML + progress.outerHTML + this.renderBulkTable(this._bulkResults);
+                        // Update only the table content
+                        const tableHost = document.getElementById('bulkTableContainer');
+                        if (tableHost) tableHost.innerHTML = this.renderBulkTable(this._bulkResults);
                     }
                     if (data.status === 'done') {
                         if (dlBtn) dlBtn.classList.remove('hidden');
@@ -317,11 +318,10 @@ class RestaurantAnalyzer {
                         } catch (_) {}
                         this._bulkPoller && clearInterval(this._bulkPoller);
                         // Force final percent to 100% on completion
-                        const inner = document.getElementById('bulkProgressInner');
-                        if (inner) {
-                            inner.style.width = '100%';
-                            inner.textContent = `${data.total || allRows.length}/${data.total || allRows.length} (100%)`;
-                        }
+                        const inner2 = document.getElementById('bulkProgressInner');
+                        if (inner2) inner2.style.width = '100%';
+                        const label2 = document.getElementById('bulkProgressLabel');
+                        if (label2) label2.textContent = `Processing completed! ${data.total || allRows.length}/${data.total || allRows.length} (100%)`;
                     }
                 })
                 .catch(() => {});
