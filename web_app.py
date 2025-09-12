@@ -396,6 +396,10 @@ def api_bulk_find_instagram():
                     min_interval = (1.0 / starts_per_sec) if starts_per_sec and starts_per_sec > 0 else 0.0
                     total = len(rows_local)
                     for idx, row in enumerate(rows_local, start=1):
+                        # Check cancel request before scheduling
+                        job_check = app.bulk_jobs.get(job_id_local)
+                        if job_check and job_check.get('cancel_requested'):
+                            break
                         if min_interval > 0:
                             now = _time.time()
                             elapsed = now - last_start_ts
@@ -471,6 +475,15 @@ def api_bulk_find_instagram():
                         job['avg_processing_sec'] = avg
                         remaining = max(0, job['total'] - comp)
                         job['eta_sec'] = int(remaining * avg)
+
+                        # If cancel requested, attempt to stop scheduling/processing further
+                        if job.get('cancel_requested'):
+                            try:
+                                executor.shutdown(wait=False, cancel_futures=True)
+                            except Exception:
+                                pass
+                            job['status'] = 'stopped'
+                            break
                 # Done
                 job = app.bulk_jobs.get(job_id_local)
                 if job:
@@ -479,7 +492,11 @@ def api_bulk_find_instagram():
                         job['results'] = _add_review_flags(job['results'])
                     except Exception:
                         pass
-                    job['status'] = 'done'
+                    if job.get('cancel_requested'):
+                        job['status'] = 'stopped'
+                        job['eta_sec'] = 0
+                    else:
+                        job['status'] = 'done'
             except Exception as e:  # pragma: no cover
                 job = app.bulk_jobs.get(job_id_local)
                 if job:
@@ -492,6 +509,22 @@ def api_bulk_find_instagram():
         return jsonify({'job_id': job_id})
     except Exception as e:
         logger.exception('bulk_find_instagram API failed')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/bulk_cancel', methods=['POST'])
+def api_bulk_cancel():
+    try:
+        data = request.get_json(silent=True) or {}
+        job_id = (data.get('job_id') or '').strip() or (request.form.get('job_id') or '').strip()
+        if not job_id:
+            return jsonify({'error': 'Missing job_id'}), 400
+        job = getattr(app, 'bulk_jobs', {}).get(job_id)
+        if not job:
+            return jsonify({'error': 'job not found'}), 404
+        job['cancel_requested'] = True
+        return jsonify({'ok': True})
+    except Exception as e:
+        logger.exception('bulk_cancel failed')
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/bulk_status', methods=['GET'])

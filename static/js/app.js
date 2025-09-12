@@ -67,6 +67,10 @@ class RestaurantAnalyzer {
         if (downloadBtn) {
             downloadBtn.addEventListener('click', () => this.downloadBulkCSV());
         }
+        const cancelBtn = document.getElementById('igBulkCancelBtn');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => this.cancelBulk());
+        }
     }
 
     initSocketListeners() {
@@ -251,6 +255,15 @@ class RestaurantAnalyzer {
         tableContainer.id = 'bulkTableContainer';
         el.appendChild(tableContainer);
         this._bulkSeen = 0; // cursor of rows consumed
+        this._bulkActive = true;
+        // Warn if user attempts to close while processing
+        window.onbeforeunload = (e) => {
+            if (this._bulkActive) {
+                e.preventDefault();
+                e.returnValue = '';
+                return '';
+            }
+        };
         const update = () => {
             if (!this._bulkJobId) return;
             const fromParam = (typeof this._bulkSeen === 'number') ? `&from=${this._bulkSeen}` : '';
@@ -292,7 +305,7 @@ class RestaurantAnalyzer {
                         const tableHost = document.getElementById('bulkTableContainer');
                         if (tableHost) tableHost.innerHTML = this.renderBulkTable(this._bulkResults);
                     }
-                    if (data.status === 'done') {
+                    if (data.status === 'done' || data.status === 'stopped') {
                         if (dlBtn) dlBtn.classList.remove('hidden');
                         // Render summary counts
                         try {
@@ -336,13 +349,29 @@ class RestaurantAnalyzer {
                         const inner2 = document.getElementById('bulkProgressInner');
                         if (inner2) inner2.style.width = '100%';
                         const label2 = document.getElementById('bulkProgressLabel');
-                        if (label2) label2.textContent = `Processing completed! ${data.total || allRows.length}/${data.total || allRows.length} (100%)`;
+                        if (label2) label2.textContent = `${data.status === 'stopped' ? 'Processing stopped.' : 'Processing completed!'} ${data.completed || allRows.length}/${data.total || allRows.length} (${data.status === 'stopped' ? Math.round(((data.completed||allRows.length)/(data.total||allRows.length))*100) : 100}%)`;
+                        this._bulkActive = false;
+                        window.onbeforeunload = null;
                     }
                 })
                 .catch(() => {});
         };
         update();
         this._bulkPoller = setInterval(update, 1500);
+    }
+
+    cancelBulk() {
+        if (!this._bulkJobId) return;
+        fetch('/api/bulk_cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ job_id: this._bulkJobId })
+        }).then(r => r.json())
+        .then(() => {
+            // UI will update on next poll; we also immediately mark as not active to suppress unload warning
+            this._bulkActive = false;
+            window.onbeforeunload = null;
+        }).catch(() => {});
     }
 
     renderBulkTable(rows) {
