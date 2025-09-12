@@ -3,6 +3,7 @@
 import asyncio
 import time
 from typing import Optional
+import contextlib
 import openai
 import re
 from config import settings
@@ -391,7 +392,9 @@ Restaurant Instagram handle:"""
     finally:
         # Ensure HTTPX async client is closed before event loop ends
         try:
-            await client.close()
+            if 'client' in locals() and hasattr(client, 'close'):
+                with contextlib.suppress(Exception):
+                    await client.close()
         except Exception:
             pass
 
@@ -410,7 +413,10 @@ def _extract_candidate_handles(text: str) -> set[str]:
     return candidates
 
 def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: str, phone: str) -> tuple[Optional[str], dict]:
-    """Synchronous wrapper for the async Firecrawl search function."""
+    """Synchronous wrapper for the async Firecrawl search function.
+
+    Prefer asyncio.run for proper loop lifecycle; fall back to manual loop only if needed.
+    """
     try:
         # Simple global rate limit ≤ 1 rps using thread lock
         import time, random
@@ -423,20 +429,25 @@ def firecrawl_search_restaurant_instagram_sync(restaurant_name: str, address: st
                 time.sleep(1.0 - elapsed + random.uniform(0.05, 0.25))
             _last_fc_call_sync = time.time()
 
-        # Use a dedicated event loop per call (isolated from threadpools)
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
+        # Preferred: asyncio.run handles setup/teardown safely
         try:
-            return loop.run_until_complete(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))
-        finally:
-            try:
-                # Give async clients time to cleanup properly
-                pending = asyncio.all_tasks(loop)
-                if pending:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                loop.close()
-            except Exception:
-                pass
+            return asyncio.run(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))
+        except RuntimeError as re:
+            # If already within a running loop (rare in threadpool), fallback
+            if 'asyncio.run() cannot be called from a running event loop' in str(re).lower():
+                loop = asyncio.new_event_loop()
+                try:
+                    return loop.run_until_complete(firecrawl_search_restaurant_instagram(restaurant_name, address, phone))
+                finally:
+                    try:
+                        pending = asyncio.all_tasks(loop)
+                        if pending:
+                            loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                        loop.close()
+                    except Exception:
+                        pass
+            else:
+                raise
     except Exception as e:
         print(f"   ❌ Firecrawl sync wrapper failed: {e}")
         return None, {}
