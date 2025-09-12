@@ -547,7 +547,7 @@ def api_bulk_status():
     else:
         # If cursor exceeds current results length (due to dedup), return empty to avoid duplicates
         latest = []
-    return jsonify({
+    resp = {
         'status': job.get('status'),
         'total': total,
         'completed': completed,
@@ -556,7 +556,12 @@ def api_bulk_status():
         'eta_sec': job.get('eta_sec', None),
         'latest': latest,
         'next_index': job.get('completed', len(results))
-    })
+    }
+    # On completion or stop, include full results so clients can re-render with final flags (e.g., review)
+    if job.get('status') in ('done', 'stopped'):
+        resp['final'] = True
+        resp['all_results'] = results
+    return jsonify(resp)
 
 @app.route('/api/bulk_download', methods=['GET'])
 def api_bulk_download():

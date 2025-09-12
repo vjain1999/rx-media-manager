@@ -215,7 +215,7 @@
                         Bulk Upload (CSV)
                     </h2>
                     <div class="space-y-4">
-                        <p class="text-sm text-gray-600">Upload a CSV with columns: <span class="font-mono">business_id or store_id, restaurant_name, address, phone</span> (phone optional).</p>
+                        <p class="text-sm text-gray-600">Upload a CSV with columns: <span class="font-mono">BUSINESS_ID, STORE_ID, RESTAURANT NAME, ADDRESS</span>. Phone optional.</p>
                         <input type="file" id="igBulkFile" accept=".csv" class="w-full" />
                         <div class="flex items-center gap-3">
                             <button id="igBulkUploadBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg">
@@ -223,6 +223,9 @@
                             </button>
                             <button id="igBulkDownloadBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-2 px-4 rounded-lg hidden">
                                 <i class="fas fa-download mr-2"></i> Download CSV
+                            </button>
+                            <button id="igBulkCancelBtn" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-4 rounded-lg hidden">
+                                <i class="fas fa-stop mr-2"></i> Cancel
                             </button>
                         </div>
                     </div>

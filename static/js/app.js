@@ -226,6 +226,9 @@ class RestaurantAnalyzer {
                 this._bulkJobId = data.job_id;
                 this._bulkResults = [];
                 this._startBulkPolling();
+                // Show cancel button during processing
+                const cancelBtn = document.getElementById('igBulkCancelBtn');
+                if (cancelBtn) cancelBtn.classList.remove('hidden');
             })
             .catch(err => {
                 console.error(err);
@@ -307,6 +310,12 @@ class RestaurantAnalyzer {
                     }
                     if (data.status === 'done' || data.status === 'stopped') {
                         if (dlBtn) dlBtn.classList.remove('hidden');
+                        // If server provides final all_results (with review flags), replace dataset
+                        if (data.final && Array.isArray(data.all_results)) {
+                            this._bulkResults = data.all_results;
+                            const tableHost = document.getElementById('bulkTableContainer');
+                            if (tableHost) tableHost.innerHTML = this.renderBulkTable(this._bulkResults);
+                        }
                         // Render summary counts
                         try {
                             const allRows = this._bulkResults || [];
@@ -352,6 +361,9 @@ class RestaurantAnalyzer {
                         if (label2) label2.textContent = `${data.status === 'stopped' ? 'Processing stopped.' : 'Processing completed!'} ${data.completed || allRows.length}/${data.total || allRows.length} (${data.status === 'stopped' ? Math.round(((data.completed||allRows.length)/(data.total||allRows.length))*100) : 100}%)`;
                         this._bulkActive = false;
                         window.onbeforeunload = null;
+                        // Hide cancel button after finish
+                        const cancelBtn2 = document.getElementById('igBulkCancelBtn');
+                        if (cancelBtn2) cancelBtn2.classList.add('hidden');
                     }
                 })
                 .catch(() => {});
