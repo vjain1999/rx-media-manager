@@ -376,7 +376,7 @@ class RestaurantAnalyzer {
 
     renderBulkTable(rows) {
         if (!rows || rows.length === 0) return '<div class="text-gray-500">No results.</div>';
-        const headers = ['business_id','store_id','restaurant_name','address','phone','instagram_handle','status','confidence_grade','confidence_score','message'];
+        const headers = ['business_id','store_id','restaurant_name','address','phone','instagram_handle','status','confidence_grade','confidence_score','review','message'];
         const thead = '<thead><tr>' + headers.map(h => {
             // Format header names for better display
             const displayName = h.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());

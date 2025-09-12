@@ -431,24 +431,23 @@ def api_bulk_find_instagram():
                                 'confidence_score': 0.0,
                                 'confidence_grade': 'Low'
                             }
-                        # Deduplicate by business_id or store_id, choose the most likely/common handle
+                        # Deduplicate by composite key (business_id, store_id), choose the most likely/common handle
                         job = app.bulk_jobs.get(job_id_local)
                         if not job:
                             continue
                         existing = job['results']
                         
-                        # Create a unique key from available IDs
+                        # Create a composite unique key from both IDs
                         bid = (result.get('business_id') or '').strip()
                         store_id = (result.get('store_id') or '').strip()
-                        unique_key = bid if bid else store_id
+                        unique_key = (bid, store_id)
                         
-                        if unique_key:
+                        if bid or store_id:
                             # gather all results so far for this ID including new one
                             def matches_key(r):
                                 r_bid = (r.get('business_id') or '').strip()
                                 r_store_id = (r.get('store_id') or '').strip()
-                                r_key = r_bid if r_bid else r_store_id
-                                return r_key == unique_key
+                                return (r_bid, r_store_id) == unique_key
                             
                             candidates = [r for r in existing if matches_key(r)]
                             candidates.append(result)
@@ -491,7 +490,7 @@ def api_bulk_find_instagram():
                     try:
                         job['results'] = _add_review_flags(job['results'])
                     except Exception:
-                        pass
+                        logger.exception('Failed to add review flags')
                     if job.get('cancel_requested'):
                         job['status'] = 'stopped'
                         job['eta_sec'] = 0
