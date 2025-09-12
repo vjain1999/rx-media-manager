@@ -69,6 +69,7 @@ class Settings(BaseSettings):
 
     # Bulk processing & verification
     bulk_find_max_workers: int = int(os.getenv("BULK_FIND_MAX_WORKERS", "12"))
+    bulk_starts_per_sec: float = float(os.getenv("BULK_STARTS_PER_SEC", "1.5"))
     use_ai_verification: bool = os.getenv("USE_AI_VERIFICATION", "true").lower() == "true"
     ai_verification_model: str = os.getenv("AI_VERIFICATION_MODEL", "gpt-4o-mini")
     ai_verification_min_confidence: float = float(os.getenv("AI_VERIFICATION_MIN_CONFIDENCE", "0.65"))
