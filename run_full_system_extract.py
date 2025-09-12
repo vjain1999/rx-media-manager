@@ -15,6 +15,8 @@ import random
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Union, Optional
+import contextlib
+import io
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from web_search import RestaurantInstagramFinder
@@ -50,20 +52,22 @@ def load_input_dataset(csv_path: Union[str, Path]) -> List[Dict]:
     return rows
 
 
-def process_single_restaurant_extract(restaurant: Dict, index: int, total: int, enable_google: bool, enable_ddg: bool) -> Dict:
+def process_single_restaurant_extract(restaurant: Dict, index: int, total: int, enable_google: bool, enable_ddg: bool, terse: bool = False) -> Dict:
     """Process a single restaurant and return extraction-only result."""
     print(f"Processing {index}/{total}: {restaurant['restaurant_name']}")
     start_time = time.time()
 
     try:
         finder = RestaurantInstagramFinder(enable_google_custom_search=enable_google, enable_duckduckgo=enable_ddg)
-        result = finder._process_single_row({
-            'business_id': restaurant['business_id'],
-            'store_id': restaurant['store_id'],
-            'restaurant_name': restaurant['restaurant_name'],
-            'address': restaurant['address'],
-            'phone': ''
-        })
+        with (contextlib.redirect_stdout(io.StringIO()) if terse else contextlib.nullcontext()):
+            with (contextlib.redirect_stderr(io.StringIO()) if terse else contextlib.nullcontext()):
+                result = finder._process_single_row({
+                    'business_id': restaurant['business_id'],
+                    'store_id': restaurant['store_id'],
+                    'restaurant_name': restaurant['restaurant_name'],
+                    'address': restaurant['address'],
+                    'phone': ''
+                })
 
         processing_time = time.time() - start_time
 
@@ -114,6 +118,9 @@ def process_dataset_extract(
     jsonl_path: str = "",
     latest_json_path: str = "",
     latest_csv_path: str = "",
+    progress_csv_path: str = "",
+    terse: bool = False,
+    progress_every: int = 100,
 ) -> List[Dict]:
     """Run extraction-only flow with optional start-rate throttling and shuffling.
 
@@ -127,6 +134,8 @@ def process_dataset_extract(
     start_time = time.time()
     results: List[Dict] = []
     jsonl_file = None
+    found_counter = 0
+    error_counter = 0
 
     def _write_latest_snapshot():
         try:
@@ -177,7 +186,7 @@ def process_dataset_extract(
             except Exception:
                 pass
 
-            fut = executor.submit(process_single_restaurant_extract, restaurant, i + 1, total, enable_google, enable_ddg)
+            fut = executor.submit(process_single_restaurant_extract, restaurant, i + 1, total, enable_google, enable_ddg, terse)
             future_to_restaurant[fut] = restaurant
 
         completed = 0
@@ -186,6 +195,10 @@ def process_dataset_extract(
                 try:
                     result = future.result()
                     results.append(result)
+                    if (result.get('instagram_handle') or '').strip():
+                        found_counter += 1
+                    if (result.get('status') or '') == 'error':
+                        error_counter += 1
                 except Exception as exc:
                     r = future_to_restaurant[future]
                     results.append({
@@ -201,6 +214,7 @@ def process_dataset_extract(
                         'message': str(exc),
                         'processing_time': 0.0,
                     })
+                    error_counter += 1
 
                 # Stream to JSONL if enabled
                 if jsonl_file is not None:
@@ -211,8 +225,33 @@ def process_dataset_extract(
                         print(f"⚠️ Failed to append to JSONL stream: {stream_err}")
 
                 completed += 1
-                if completed % 10 == 0 or completed == total:
-                    print(f"🧭 Progress: {completed}/{total}")
+                if completed % max(1, progress_every) == 0 or completed == total:
+                    elapsed = max(1e-6, time.time() - start_time)
+                    rps = completed / elapsed
+                    remaining = max(0, total - completed)
+                    eta_s = int(remaining / rps) if rps > 0 else 0
+                    print(f"🧭 Progress: {completed}/{total} | found={found_counter} errors={error_counter} | rps={rps:.2f} | eta~{eta_s//3600:02d}:{(eta_s%3600)//60:02d}:{eta_s%60:02d}")
+
+                    # Append a row to progress CSV
+                    if progress_csv_path:
+                        try:
+                            p = Path(progress_csv_path)
+                            write_header = not p.exists()
+                            with open(progress_csv_path, 'a', newline='', encoding='utf-8') as pf:
+                                writer = csv.writer(pf)
+                                if write_header:
+                                    writer.writerow(["timestamp", "completed", "total", "found", "errors", "rps", "eta_seconds"])
+                                writer.writerow([
+                                    datetime.now().isoformat(timespec='seconds'),
+                                    completed,
+                                    total,
+                                    found_counter,
+                                    error_counter,
+                                    f"{rps:.3f}",
+                                    eta_s,
+                                ])
+                        except Exception as e:
+                            print(f"⚠️ Failed to write progress CSV: {e}")
 
                 # Periodic snapshot
                 if save_every > 0 and (completed % save_every == 0):
@@ -295,6 +334,8 @@ def main():
     parser.add_argument("--enable-ddg", dest="enable_ddg", action="store_true", help="Enable DuckDuckGo strategy")
     parser.add_argument("--save-every", dest="save_every", type=int, default=100, help="Write snapshot every N completed rows (0 to disable)")
     parser.add_argument("--output-prefix", dest="output_prefix", default="", help="Custom output prefix for results naming")
+    parser.add_argument("--terse", dest="terse", action="store_true", help="Reduce per-item logs and show compact progress heartbeats")
+    parser.add_argument("--progress-every", dest="progress_every", type=int, default=100, help="Print heartbeat and append progress CSV every N rows")
     args = parser.parse_args()
 
     print("🔧 FULL INSTAGRAM DISCOVERY SYSTEM: EXTRACTION-ONLY RUN")
@@ -311,6 +352,7 @@ def main():
     jsonl_path = str(results_dir / f"{base_name}.jsonl")
     latest_json = str(results_dir / f"{base_name}_latest.json")
     latest_csv = str(results_dir / f"{base_name}_latest.csv")
+    progress_csv = str(results_dir / f"{base_name}_progress.csv")
 
     results = process_dataset_extract(
         restaurants,
@@ -323,6 +365,9 @@ def main():
         jsonl_path=jsonl_path,
         latest_json_path=latest_json,
         latest_csv_path=latest_csv,
+        progress_csv_path=progress_csv,
+        terse=bool(args.terse),
+        progress_every=max(1, int(args.progress_every)),
     )
     results = add_review_flags(results)
     files = save_extract_results(results, output_basename=base_name)
@@ -331,6 +376,7 @@ def main():
     print(f"  • JSON: {files['json']}")
     print(f"  • CSV:  {files['csv']}")
     print(f"  • JSONL stream: {jsonl_path}")
+    print(f"  • Progress CSV: {progress_csv}")
 
 
 if __name__ == "__main__":
