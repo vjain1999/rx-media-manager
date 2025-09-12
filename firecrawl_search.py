@@ -6,6 +6,7 @@ from typing import Optional
 import openai
 import re
 from config import settings
+from openai_client import make_openai_client
 
 try:
     from firecrawl import AsyncFirecrawlApp, ScrapeOptions
@@ -29,7 +30,7 @@ def _get_fc_thread_lock():
 async def _parse_location_components_async(address: str) -> dict:
     """Async version of LLM-based address parsing."""
     try:
-        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        client = make_openai_client(async_client=True)
         prompt = f"""Parse this address into components. Return only valid JSON.
 
 Address: {address}
@@ -314,7 +315,7 @@ def _extract_content_from_response(response, validation_data: dict = None, city:
 async def _analyze_content_with_openai(content: str, restaurant_name: str, address: str) -> Optional[str]:
     """Analyze search content with OpenAI to find Instagram handle."""
     try:
-        client = openai.AsyncOpenAI(api_key=settings.openai_api_key)
+        client = make_openai_client(async_client=True)
         
         # Truncate content if too long (keep first 4000 chars)
         if len(content) > 4000:

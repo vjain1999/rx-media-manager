@@ -9,6 +9,7 @@ import time
 from config import settings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import openai
+from openai_client import make_openai_client
 
 class RestaurantInstagramFinder:
     """Find Instagram handles for restaurants using web search."""
@@ -196,7 +197,7 @@ class RestaurantInstagramFinder:
         Returns (verified_bool, confidence_float, reason_str).
         """
         try:
-            client = openai.OpenAI(api_key=settings.openai_api_key)
+            client = make_openai_client(async_client=False)
             prompt = (
                 f"Merchant: {restaurant_name}\nAddress: {address}\nCandidate IG: @{handle}\n\n"
                 "Does this Instagram handle plausibly represent this merchant (local or corporate)?\n"
