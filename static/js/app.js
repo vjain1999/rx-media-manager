@@ -8,6 +8,21 @@ class RestaurantAnalyzer {
         this.initSocketListeners();
     }
 
+    // Format seconds into a friendly string (e.g., 40m, 1h 5m, 2m 15s)
+    formatDuration(totalSeconds) {
+        const secs = Math.max(0, Math.floor(totalSeconds || 0));
+        const h = Math.floor(secs / 3600);
+        const m = Math.floor((secs % 3600) / 60);
+        const s = secs % 60;
+        if (h > 0) {
+            return m > 0 ? `${h}h ${m}m` : `${h}h`;
+        }
+        if (m > 0) {
+            return s > 0 ? `${m}m ${s}s` : `${m}m`;
+        }
+        return `${s}s`;
+    }
+
     initEventListeners() {
         // Form submission
         document.getElementById('restaurantForm').addEventListener('submit', (e) => {
@@ -258,8 +273,8 @@ class RestaurantAnalyzer {
                             label.className = 'text-sm text-green-600 mb-2 font-semibold';
                         } else {
                             const percent = (typeof data.percent === 'number') ? ` (${data.percent}%)` : '';
-                            const eta = (typeof data.eta_sec === 'number') ? ` • ETA: ${Math.max(0, data.eta_sec)}s` : '';
-                            const avg = (typeof data.avg_processing_sec === 'number') ? ` • ~${data.avg_processing_sec.toFixed(1)}s/row` : '';
+                            const eta = (typeof data.eta_sec === 'number') ? ` • ETA: ${this.formatDuration(data.eta_sec)}` : '';
+                            const avg = (typeof data.avg_processing_sec === 'number') ? ` • ~${this.formatDuration(data.avg_processing_sec)} per row` : '';
                             label.textContent = `Processing restaurants... ${data.completed || 0}/${data.total || 0}${percent}${avg}${eta}`;
                         }
                     }
