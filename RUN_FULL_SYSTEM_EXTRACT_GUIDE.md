@@ -1,5 +1,11 @@
 ## RUN_FULL_SYSTEM_EXTRACT — Bulk Instagram Handle Discovery Guide
 
+This pipeline helps non‑technical teams turn a simple spreadsheet of restaurants into a clean list of Instagram handles at scale. You provide a CSV with the merchant name and address; the system then uses safe web search to look for the most likely Instagram profile, applies AI‑assisted checks to reduce false positives, and writes easy‑to‑use CSV/JSON files. While it runs, it shows progress, saves periodic snapshots, and continues even if individual rows fail, so long jobs are resilient and interrupt‑tolerant.
+
+Under the hood, the system combines multiple discovery strategies that work well together: official Google Custom Search (when enabled), DuckDuckGo HTML results (no API key required), and an enhanced Firecrawl + OpenAI path that analyzes web snippets to extract probable handles with location awareness. We never require Instagram passwords; we operate on public web content only. To keep things safe at scale, the runner limits how fast new work starts, adapts to upstream rate limits automatically, and writes streaming JSONL plus “latest” snapshots so you can monitor outcomes live.
+
+The outputs are designed for immediate hand‑off: a final CSV and JSON containing each business’s IDs, the found Instagram handle, a simple confidence grade, the discovery method, and any message/status explaining not‑found or errors. Rows for the same business that map to different handles are flagged for review so ops can resolve chains or duplicates quickly. Most teams just run one command with their CSV, then use the results in `results/`—no code changes needed.
+
 This guide explains how the extraction-only runner works to find Instagram handles for many restaurants in bulk, driven by the merchant (Mx) name and address from a CSV. It’s designed for both non-technical and technical readers.
 
 ---
@@ -37,8 +43,8 @@ flowchart LR
   C --> E[Handle not found? no]
   D --> F[Confidence scoring + status]
   E --> F
-  F --> G[Stream JSONL + periodic snapshots (CSV/JSON)]
-  G --> H[Final results saved (CSV + JSON)]
+  F --> G[Stream JSONL + periodic snapshots: CSV and JSON]
+  G --> H[Final results saved: CSV and JSON]
   H --> I[Review flags when a business has multiple handles]
 ```
 
