@@ -1,207 +1,119 @@
-Production Instagram cookies setup
+## Restaurant Video Analysis System
 
-1) Export cookies from a logged-in browser (Netscape format)
-   - Use a cookies.txt exporter extension while logged into instagram.com
-   - Save as insta_cookies.txt
+Automates discovery of restaurant Instagram accounts, collects recent videos, scores quality with AI, and prepares SMS outreach for approvals.
 
-2) Store in Railway securely
-   - Option A (recommended): Add a Railway Volume mounted at /app/secrets and upload insta_cookies.txt there
-   - Option B: Add a Railway variable IG_COOKIES_B64 with base64 of the file; decode at startup to /app/secrets/insta_cookies.txt
+### High-level pipeline
 
-3) Configure environment variables
-   - IG_COOKIES_FILE=/app/secrets/insta_cookies.txt
-   - SKIP_IG_GRAPHQL=true
+Restaurant row → Find Instagram handle → Discover recent IG shortcodes → Download videos → LLM video quality review → Approved set → SMS preview/sending
 
-4) Optional: limit verification fan-out
-   - MAX_VERIFICATION_CANDIDATES=6
+## Components and data flow
 
-# Restaurant Video Analysis System
+- Instagram handle discovery: `web_search.py`, `firecrawl_search.py`, `gpt_native_search.py`
+  - Multi-strategy: Google Custom Search (optional), DuckDuckGo HTML, Firecrawl+OpenAI, GPT-4o with web_search tool, and GMB heuristics
+  - AI verification and confidence scoring, location-weighting, optional enhanced checks
+- Shortcode discovery and verification: `instagram_client.py`
+  - Default path: Firecrawl web search → extract shortcodes → verify with yt-dlp metadata (no download). Optional author check
+  - Optional fallback: Instaloader GraphQL with conservative pacing and session reuse
+- Download: `ytdlp_downloader.py`
+  - Cookies-based access preferred; randomized delays; retry `/p` then `/reel`
+- Analysis: `video_analyzer.py`
+  - Extract frames (OpenCV), send to OpenAI Vision (gpt-4o), produce JSON scores and recommendation
+- Orchestration: `main.py` (single restaurant), `run_full_system_extract.py` (handles-only), `run_full_system_golden.py` (evaluation)
+- Web UI: `web_app.py` (Flask + Socket.IO) with progress and SMS preview
 
-An automated system that finds, analyzes, and approves restaurant Instagram videos for DoorDash store pages.
-
-## Features
-
-1. **Web Search**: Automatically finds Instagram handles from restaurant name and address
-2. **Instagram Integration**: Fetches recent videos using Instagram credentials (rate-limited)
-3. **Video Download**: Downloads videos efficiently with concurrent processing
-4. **AI Analysis**: Uses LLM (GPT-4 Vision) to analyze video quality for marketing use
-5. **SMS Notifications**: Sends Twilio SMS to restaurants for video approval
-6. **Modular Design**: Each component can be used independently
-
-## Pipeline Overview
-
-```
-Restaurant Info → Find Instagram → Fetch Videos → Download → Analyze Quality → SMS Approval
-```
+Outputs live under `results/` and downloads under `downloads/`.
 
 ## Setup
 
-1. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+1) Install dependencies
 
-2. **Environment Variables**: Create a `.env` file with:
-   ```env
-   # Instagram credentials
-   INSTAGRAM_USERNAME=your_instagram_username
-   INSTAGRAM_PASSWORD=your_instagram_password
-
-   # Twilio credentials
-   TWILIO_ACCOUNT_SID=your_twilio_account_sid
-   TWILIO_AUTH_TOKEN=your_twilio_auth_token
-   TWILIO_PHONE_NUMBER=your_twilio_phone_number
-
-   # OpenAI API key for video analysis
-   OPENAI_API_KEY=your_openai_api_key
-
-   # Google Custom Search (optional, for better Instagram discovery)
-   GOOGLE_SEARCH_API_KEY=your_google_search_api_key
-   GOOGLE_SEARCH_CX=your_custom_search_engine_id
-   ```
-
-## Usage
-
-### Command Line Interface
-
-**Process a single restaurant:**
 ```bash
-python cli.py single \
-  --name "Joe's Pizza" \
-  --address "123 Main St, New York, NY" \
-  --phone "+1234567890" \
-  --days-back 30 \
-  --min-score 7.0
+pip install -r requirements.txt
 ```
 
-**Process multiple restaurants from file:**
-```bash
-python cli.py batch \
-  --file example_restaurants.json \
-  --days-back 30 \
-  --min-score 7.0 \
-  --output results.json
+2) Configure environment (.env)
+
+```env
+# OpenAI / Portkey
+OPENAI_API_KEY=...
+USE_PORTKEY=false
+PORTKEY_BASE_URL=https://api.portkey.ai/v1
+PORTKEY_VIRTUAL_KEY=
+PORTKEY_API_KEY=
+
+# Instagram scraping
+SKIP_IG_GRAPHQL=true
+DISABLE_INSTALOADER_FALLBACK=true
+IG_COOKIES_FILE=/app/secrets/insta_cookies.txt
+# or: IG_COOKIES_FROM_BROWSER=chrome[:Profile]
+MAX_VERIFICATION_CANDIDATES=8
+VERIFY_AUTHOR=false
+
+# Handle discovery (optional)
+GOOGLE_SEARCH_API_KEY=
+GOOGLE_SEARCH_CX=
+FIRECRAWL_API_KEY=
+
+# SMS / misc
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
+LOG_LEVEL=INFO
 ```
 
-### Python API
+Cookie setup (production):
+- Export Instagram cookies (Netscape format) and mount to `/app/secrets/insta_cookies.txt`, or pass base64 via `IG_COOKIES_B64[_i]` (web_app decodes on boot).
+
+## Running
+
+- Web UI with realtime progress and SMS preview:
+
+```bash
+python web_app.py
+# open http://localhost:5000
+```
+
+- Extract handles only over a CSV (see script help for flags):
+
+```bash
+python run_full_system_extract.py --csv data/your_dataset.csv --workers 6 --starts-per-sec 1.5 --shuffle
+```
+
+- Full golden-dataset evaluation:
+
+```bash
+python run_full_system_golden.py --csv data/golden_dataset.csv --workers 6 --starts-per-sec 1.5
+```
+
+- Programmatic single-restaurant run:
 
 ```python
 from main import RestaurantVideoProcessor
 
 processor = RestaurantVideoProcessor()
-
-# Process single restaurant
 result = processor.process_restaurant(
-    restaurant_name="Mama Rosa's Pizza",
-    address="123 Main St, New York, NY 10001", 
+    restaurant_name="Test Restaurant",
+    address="123 Test St, Test City, TC 12345",
     phone="+1234567890",
     days_back=30,
-    min_quality_score=7.0
+    min_quality_score=7.0,
 )
-
-# Process multiple restaurants
-restaurants = [
-    {"name": "Restaurant 1", "address": "Address 1", "phone": "Phone 1"},
-    {"name": "Restaurant 2", "address": "Address 2", "phone": "Phone 2"}
-]
-results = processor.process_restaurants_batch(restaurants)
 ```
 
-## Module Documentation
+## Key implementation details
 
-### `web_search.py`
-- Finds Instagram handles using Google Custom Search and DuckDuckGo
-- Verifies handles by checking if restaurant name appears on the profile
-- Fallback strategies for robust discovery
+- Portkey routing for OpenAI supported via `USE_PORTKEY=true` (see `openai_client.py`).
+- IG discovery prefers Firecrawl+OpenAI; strategies are throttled with adaptive cooldowns.
+- Shortcode verification uses `yt-dlp` metadata only (no download) with modern UA and optional cookies.
+- Instaloader path is hardened (session reuse, backoff) and disabled in prod by default.
+- Video analysis uses gpt-4o with up to 3 frames per video and a structured JSON prompt.
 
-### `instagram_client.py`
-- Uses `instaloader` library for Instagram API access
-- Rate-limited requests to avoid getting blocked
-- Fetches both regular posts and Reels
-- Handles private profiles and authentication
+## Rate limits and safety
 
-### `video_downloader.py`
-- Concurrent video downloads with configurable limits
-- Verifies downloaded files for corruption
-- Cleanup utilities for failed downloads
+- Starts-per-second throttles, exponential backoff on 429s, random jitters before downloads, and candidate-verification caps.
+- Cookies are preferred over username/password for IG; avoid storing credentials; never commit secrets.
 
-### `video_analyzer.py`
-- Extracts representative frames from videos
-- Uses GPT-4 Vision for quality analysis
-- Scores videos on multiple criteria:
-  - Food quality (1-10)
-  - Visual appeal (1-10)
-  - Professionalism (1-10)
-  - Brand safety (1-10)
-  - Marketing value (1-10)
+## Where to learn more
 
-### `sms_notifier.py`
-- Sends SMS via Twilio to restaurant phone numbers
-- Includes video URLs and quality scores
-- Handles both approval requests and "no videos found" notifications
-
-### `config.py`
-- Centralized configuration management
-- Environment variable loading
-- Directory creation and path management
-
-## Rate Limiting & Anti-Detection
-
-- **Instagram**: Uses authenticated requests with delays between calls
-- **Web Search**: Rotates between search engines and includes delays
-- **API Calls**: Rate-limited OpenAI and Twilio requests
-- **Downloads**: Concurrent but limited simultaneous downloads
-
-## Output Files
-
-- **Individual Results**: `results/{restaurant_name}_{timestamp}.json`
-- **Batch Results**: `results/batch_results_{timestamp}.json`
-- **Downloaded Videos**: `downloads/videos/`
-- **Extracted Frames**: `downloads/frames/` (temporary)
-
-## Quality Scoring
-
-Videos are scored on 5 criteria (1-10 scale):
-1. **Food Quality**: How appetizing the food looks
-2. **Visual Appeal**: Lighting, composition, aesthetics
-3. **Professionalism**: Production quality
-4. **Brand Safety**: Appropriate for food delivery platform
-5. **Marketing Value**: Effectiveness for attracting customers
-
-Videos need both a high overall score AND "APPROVE" recommendation to be selected.
-
-## Error Handling
-
-- Graceful handling of private/non-existent Instagram profiles
-- Retry logic for failed downloads
-- Comprehensive error logging and reporting
-- Continues processing other restaurants if one fails
-
-## Security Considerations
-
-- API keys stored in environment variables
-- No hardcoded credentials in source code
-- Rate limiting to respect service limits
-- User-agent rotation for web scraping
-
-## Troubleshooting
-
-**Instagram Login Issues**:
-- Verify credentials in `.env` file
-- Instagram may require 2FA - use app passwords
-- Consider using Instagram Basic Display API for production
-
-**Video Download Failures**:
-- Check internet connection
-- Instagram may block direct video URLs after time
-- Try reducing concurrent download limit
-
-**LLM Analysis Errors**:
-- Verify OpenAI API key and credits
-- Check video file integrity
-- Reduce frame extraction rate if hitting token limits
-
-**SMS Delivery Issues**:
-- Verify Twilio credentials and phone number format
-- Check that restaurant phone numbers include country code
-- Ensure Twilio account has sufficient credits
+- Technical IG scraping deep dive: `IG_SCRAPING_TECHNICAL.md`
+- Non-technical IG overview: `IG_SCRAPING_NON_TECHNICAL.md`
