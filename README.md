@@ -79,6 +79,20 @@ python web_app.py
 python run_full_system_extract.py --csv data/your_dataset.csv --workers 6 --starts-per-sec 1.5 --shuffle
 ```
 
+- Extract handles with inline API keys (no .env):
+
+```bash
+# Edit keys at the top of run_full_system_extract_with_keys.py, then run:
+python run_full_system_extract_with_keys.py \
+  --csv data/your_dataset.csv \
+  --workers 6 --starts-per-sec 1.5 --shuffle --enable-ddg \
+  --output-prefix your_prefix
+```
+
+Notes:
+- This runner sets keys inline and configures clients before imports (no os.environ).
+- For networks blocking api.openai.com, set USE_PORTKEY=True in the file and add Portkey keys.
+
 - Full golden-dataset evaluation:
 
 ```bash
